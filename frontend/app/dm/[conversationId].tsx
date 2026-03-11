@@ -9,11 +9,10 @@ import {
   Platform, 
   ActivityIndicator,
   Keyboard,
-  Dimensions,
-  ScrollView
+  Dimensions
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { sendDirectMessage, getConversations, getDirectMessages } from '../../src/services/api';
 import { subscribeToMessages, ChatMessage } from '../../src/services/firebase/chatService';
@@ -22,7 +21,7 @@ import { Conversation } from '../../src/types';
 import { Avatar } from '../../src/components/Avatar';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const HEADER_HEIGHT = 70;
 
 export default function DirectMessageScreen() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
@@ -38,65 +37,74 @@ export default function DirectMessageScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [isRealtime, setIsRealtime] = useState(false);
-  const [viewportHeight, setViewportHeight] = useState(SCREEN_HEIGHT);
-  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [containerHeight, setContainerHeight] = useState(Dimensions.get('window').height);
 
-  // Handle iOS Safari visual viewport changes (keyboard open/close)
+  // iOS Safari viewport fix - inject CSS and handle resize
   useEffect(() => {
-    if (Platform.OS === 'web') {
-      // Use visualViewport API for iOS Safari
-      const handleResize = () => {
-        if (typeof window !== 'undefined' && window.visualViewport) {
-          const newHeight = window.visualViewport.height;
-          setViewportHeight(newHeight);
-          setIsKeyboardVisible(newHeight < SCREEN_HEIGHT * 0.75);
-          
-          // Scroll to bottom when keyboard opens
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }, 100);
-        }
-      };
-
-      if (typeof window !== 'undefined' && window.visualViewport) {
-        window.visualViewport.addEventListener('resize', handleResize);
-        window.visualViewport.addEventListener('scroll', handleResize);
-        handleResize(); // Initial call
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      // Inject CSS to fix iOS Safari issues
+      const styleId = 'ios-safari-fix';
+      if (!document.getElementById(styleId)) {
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+          html, body {
+            height: 100%;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+          }
+          #root {
+            height: 100%;
+            overflow: hidden;
+          }
+        `;
+        document.head.appendChild(style);
       }
 
-      return () => {
-        if (typeof window !== 'undefined' && window.visualViewport) {
-          window.visualViewport.removeEventListener('resize', handleResize);
-          window.visualViewport.removeEventListener('scroll', handleResize);
+      // Handle visual viewport changes (iOS Safari keyboard)
+      const updateHeight = () => {
+        if (window.visualViewport) {
+          setContainerHeight(window.visualViewport.height);
+        } else {
+          setContainerHeight(window.innerHeight);
         }
+        // Scroll to bottom
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 50);
+      };
+
+      // Initial height
+      updateHeight();
+
+      // Listen for viewport changes
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', updateHeight);
+        window.visualViewport.addEventListener('scroll', updateHeight);
+      }
+      window.addEventListener('resize', updateHeight);
+
+      return () => {
+        if (window.visualViewport) {
+          window.visualViewport.removeEventListener('resize', updateHeight);
+          window.visualViewport.removeEventListener('scroll', updateHeight);
+        }
+        window.removeEventListener('resize', updateHeight);
       };
     } else {
       // Native keyboard handling
-      const keyboardWillShow = Keyboard.addListener(
+      const showSub = Keyboard.addListener(
         Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-        (e) => {
-          setIsKeyboardVisible(true);
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }, 100);
-        }
-      );
-      
-      const keyboardWillHide = Keyboard.addListener(
-        Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
         () => {
-          setIsKeyboardVisible(false);
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
         }
       );
-
-      return () => {
-        keyboardWillShow.remove();
-        keyboardWillHide.remove();
-      };
+      return () => showSub.remove();
     }
   }, []);
 
-  // Fetch conversation details (only once)
+  // Fetch conversation details
   const fetchConversation = useCallback(async () => {
     try {
       const convResponse = await getConversations();
@@ -109,10 +117,9 @@ export default function DirectMessageScreen() {
     }
   }, [conversationId]);
 
-  // Fetch messages via REST API (fallback)
+  // Fetch messages via REST API
   const fetchMessagesViaAPI = useCallback(async () => {
     try {
-      console.log('[Chat] Fetching messages via REST API');
       const response = await getDirectMessages(conversationId!);
       const apiMessages = response.data.map((msg: any) => ({
         id: msg.id,
@@ -127,100 +134,67 @@ export default function DirectMessageScreen() {
       setMessages(apiMessages);
       setLoading(false);
       setIsRealtime(false);
-      
-      // Auto-scroll
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
     } catch (error) {
-      console.error('[Chat] Error fetching messages via API:', error);
+      console.error('[Chat] Error fetching messages:', error);
       setLoading(false);
     }
   }, [conversationId]);
 
   useEffect(() => {
-    // Fetch conversation details
     fetchConversation();
+    fetchMessagesViaAPI();
     
     let unsubscribe: (() => void) | null = null;
     let pollingInterval: NodeJS.Timeout | null = null;
     let realtimeWorking = false;
     
-    // First, fetch messages via REST API immediately
-    fetchMessagesViaAPI();
-    
-    // Set up real-time Firestore listener for messages
     try {
       unsubscribe = subscribeToMessages(
         conversationId!,
         (updatedMessages) => {
-          console.log('[Chat] Real-time update received:', updatedMessages.length, 'messages');
           setMessages(updatedMessages);
           setLoading(false);
           setIsRealtime(true);
           realtimeWorking = true;
-          
-          // Stop polling if real-time works
           if (pollingInterval) {
             clearInterval(pollingInterval);
             pollingInterval = null;
           }
-          
-          // Auto-scroll to bottom when new message arrives
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }, 100);
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
         },
-        (error) => {
-          console.error('[Chat] Real-time listener error:', error);
-          // Start polling if real-time fails
+        () => {
           if (!pollingInterval) {
-            console.log('[Chat] Starting polling fallback');
-            pollingInterval = setInterval(() => {
-              fetchMessagesViaAPI();
-            }, 2000);
+            pollingInterval = setInterval(fetchMessagesViaAPI, 2000);
           }
         }
       );
     } catch (error) {
-      console.error('[Chat] Failed to set up real-time listener:', error);
+      console.error('[Chat] Real-time setup failed:', error);
     }
     
-    // Start polling as backup after 3 seconds if real-time hasn't kicked in
     setTimeout(() => {
       if (!realtimeWorking && !pollingInterval) {
-        console.log('[Chat] Starting polling (real-time not responding)');
-        pollingInterval = setInterval(() => {
-          fetchMessagesViaAPI();
-        }, 2000);
+        pollingInterval = setInterval(fetchMessagesViaAPI, 2000);
       }
     }, 3000);
 
-    // Cleanup
     return () => {
-      console.log('[Chat] Cleanup: unsubscribing from chat:', conversationId);
-      if (unsubscribe) {
-        unsubscribe();
-      }
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
+      if (unsubscribe) unsubscribe();
+      if (pollingInterval) clearInterval(pollingInterval);
     };
   }, [conversationId, fetchConversation, fetchMessagesViaAPI]);
 
   const handleSend = async () => {
     if (!newMessage.trim() || !conversation) return;
-
     const messageText = newMessage.trim();
-    setNewMessage(''); // Clear input immediately for better UX
+    setNewMessage('');
     setSending(true);
     
     try {
       await sendDirectMessage(conversation.user.sl_id, messageText);
-      // Always fetch after sending to ensure message appears
       setTimeout(() => fetchMessagesViaAPI(), 300);
     } catch (error: any) {
-      // Restore the message if sending failed
       setNewMessage(messageText);
       alert(error.response?.data?.detail || 'Failed to send message');
     } finally {
@@ -236,7 +210,6 @@ export default function DirectMessageScreen() {
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const isOwnMessage = item.sender_id === user?.id;
-
     return (
       <View style={[styles.messageContainer, isOwnMessage && styles.ownMessageContainer]}>
         {!isOwnMessage && (
@@ -263,99 +236,94 @@ export default function DirectMessageScreen() {
     );
   }
 
-  // Calculate container height for web (iOS Safari fix)
-  const containerStyle = Platform.OS === 'web' 
-    ? [styles.container, { height: viewportHeight, maxHeight: viewportHeight }]
-    : styles.container;
+  // Calculate heights
+  const safeTop = insets.top || (Platform.OS === 'web' ? 0 : 44);
+  const safeBottom = insets.bottom || (Platform.OS === 'web' ? 0 : 34);
+  const inputHeight = 60 + safeBottom;
+  const availableHeight = Platform.OS === 'web' 
+    ? containerHeight 
+    : Dimensions.get('window').height;
+  const messagesHeight = availableHeight - safeTop - HEADER_HEIGHT - inputHeight;
 
   return (
-    <View style={containerStyle}>
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-          </TouchableOpacity>
-          {conversation && (
-            <>
-              <Avatar name={conversation.user.name} photo={conversation.user.photo} size={40} />
-              <View style={styles.headerInfo}>
-                <Text style={styles.headerTitle}>{conversation.user.name}</Text>
-                <View style={styles.statusRow}>
-                  <Text style={styles.headerSubtitle}>{conversation.user.sl_id}</Text>
-                  {isRealtime && (
-                    <View style={styles.realtimeBadge}>
-                      <View style={styles.realtimeDot} />
-                      <Text style={styles.realtimeText}>Live</Text>
-                    </View>
-                  )}
-                </View>
+    <View style={[
+      styles.container,
+      Platform.OS === 'web' && { height: containerHeight, maxHeight: containerHeight }
+    ]}>
+      {/* Safe area top padding */}
+      <View style={{ height: safeTop, backgroundColor: COLORS.surface }} />
+      
+      {/* Header */}
+      <View style={[styles.header, { height: HEADER_HEIGHT }]}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+        </TouchableOpacity>
+        {conversation && (
+          <>
+            <Avatar name={conversation.user.name} photo={conversation.user.photo} size={40} />
+            <View style={styles.headerInfo}>
+              <Text style={styles.headerTitle}>{conversation.user.name}</Text>
+              <View style={styles.statusRow}>
+                <Text style={styles.headerSubtitle}>{conversation.user.sl_id}</Text>
+                {isRealtime && (
+                  <View style={styles.realtimeBadge}>
+                    <View style={styles.realtimeDot} />
+                    <Text style={styles.realtimeText}>Live</Text>
+                  </View>
+                )}
               </View>
-            </>
+            </View>
+          </>
+        )}
+      </View>
+
+      {/* Messages - Fixed height container */}
+      <View style={{ height: messagesHeight, flex: 0 }}>
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.messagesList}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={true}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="chatbubble-outline" size={48} color={COLORS.textLight} />
+              <Text style={styles.emptyText}>Start your conversation</Text>
+            </View>
+          }
+        />
+      </View>
+
+      {/* Input - Fixed at bottom */}
+      <View style={[styles.inputContainer, { paddingBottom: Math.max(safeBottom, 8) }]}>
+        <TextInput
+          ref={inputRef}
+          style={styles.input}
+          placeholder="Type a message..."
+          value={newMessage}
+          onChangeText={setNewMessage}
+          multiline
+          maxLength={1000}
+          placeholderTextColor={COLORS.textLight}
+          onFocus={() => {
+            setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 300);
+          }}
+        />
+        <TouchableOpacity
+          style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}
+          onPress={handleSend}
+          disabled={!newMessage.trim() || sending}
+        >
+          {sending ? (
+            <ActivityIndicator size="small" color={COLORS.textWhite} />
+          ) : (
+            <Ionicons name="send" size={20} color={COLORS.textWhite} />
           )}
-        </View>
-
-        {/* Chat Content - Messages + Input */}
-        <View style={styles.chatContent}>
-          {/* Messages List */}
-          <FlatList
-            ref={flatListRef}
-            data={messages}
-            renderItem={renderMessage}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.messagesList}
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="interactive"
-            showsVerticalScrollIndicator={true}
-            ListEmptyComponent={
-              <View style={styles.emptyContainer}>
-                <Ionicons name="chatbubble-outline" size={48} color={COLORS.textLight} />
-                <Text style={styles.emptyText}>Start your conversation</Text>
-                <Text style={styles.emptySubtext}>Messages will appear in real-time</Text>
-              </View>
-            }
-          />
-
-          {/* Input Container - Fixed at bottom */}
-          <View style={[
-            styles.inputContainer,
-            Platform.OS === 'web' && styles.inputContainerWeb,
-            { paddingBottom: Platform.OS === 'web' ? SPACING.sm : Math.max(insets.bottom, SPACING.sm) }
-          ]}>
-            <TextInput
-              ref={inputRef}
-              style={styles.input}
-              placeholder="Type a message..."
-              value={newMessage}
-              onChangeText={setNewMessage}
-              multiline
-              maxLength={1000}
-              placeholderTextColor={COLORS.textLight}
-              blurOnSubmit={false}
-              returnKeyType="default"
-              onFocus={() => {
-                // Scroll to end when input focused
-                setTimeout(() => {
-                  flatListRef.current?.scrollToEnd({ animated: true });
-                }, 300);
-              }}
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}
-              onPress={handleSend}
-              disabled={!newMessage.trim() || sending}
-            >
-              {sending ? (
-                <ActivityIndicator size="small" color={COLORS.textWhite} />
-              ) : (
-                <Ionicons name="send" size={20} color={COLORS.textWhite} />
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </SafeAreaView>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -364,16 +332,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
-    // For web: prevent overflow
-    ...(Platform.OS === 'web' && {
-      overflow: 'hidden',
-      position: 'relative' as const,
-    }),
-  },
-  safeArea: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
+    ...(Platform.OS === 'web' ? {
+      overflow: 'hidden' as const,
+      display: 'flex' as const,
+      flexDirection: 'column' as const,
+    } : {}),
   },
   loadingContainer: {
     flex: 1,
@@ -389,11 +352,10 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: SPACING.md,
+    paddingHorizontal: SPACING.md,
     backgroundColor: COLORS.surface,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.divider,
-    flexShrink: 0,
   },
   backButton: {
     marginRight: SPACING.md,
@@ -437,12 +399,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     color: '#4CAF50',
-  },
-  chatContent: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
   },
   messagesList: {
     padding: SPACING.md,
@@ -499,27 +455,14 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: COLORS.textSecondary,
   },
-  emptySubtext: {
-    marginTop: SPACING.xs,
-    fontSize: 12,
-    color: COLORS.textLight,
-  },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    padding: SPACING.md,
+    paddingHorizontal: SPACING.md,
     paddingTop: SPACING.sm,
     backgroundColor: COLORS.surface,
     borderTopWidth: 1,
     borderTopColor: COLORS.divider,
-    flexShrink: 0,
-  },
-  inputContainerWeb: {
-    // Ensure input stays visible on iOS Safari
-    position: 'relative' as const,
-    bottom: 0,
-    left: 0,
-    right: 0,
   },
   input: {
     flex: 1,
@@ -527,7 +470,7 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
-    fontSize: 14,
+    fontSize: 16, // 16px prevents iOS Safari zoom
     color: COLORS.text,
     maxHeight: 100,
     minHeight: 40,
