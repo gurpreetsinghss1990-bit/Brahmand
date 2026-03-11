@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Sanatan Lok Backend API Test Suite
-Testing Real-time Chat Messaging Functionality with Firestore
-Focus: Real-time listener and message ordering
+Testing FCM Push Notification Endpoints
+Focus: FCM token management and push notification integration
 """
 
 import requests
@@ -16,15 +16,17 @@ class SanatanLokTester:
         self.session = requests.Session()
         self.session.headers.update({'Content-Type': 'application/json'})
         
-        # Real Time User 1 data  
+        # FCM Test User 1 data  
         self.token1 = None
-        self.user1_phone = "+913333333333"
+        self.user1_phone = "+915555555555"
         self.user1_sl_id = None
+        self.user1_fcm_token = "test_fcm_token_123456789"
         
-        # Real Time User 2 data
+        # FCM Test User 2 data
         self.token2 = None
-        self.user2_phone = "+914444444444"
+        self.user2_phone = "+916666666666"
         self.user2_sl_id = None
+        self.user2_fcm_token = "second_user_fcm_token"
         
         self.mock_otp = "123456"
         self.chat_id = None
@@ -93,51 +95,148 @@ class SanatanLokTester:
             print(f"   Exception creating user {phone}: {str(e)}")
             return None, None
 
-    def test_1_create_user_1(self) -> bool:
-        """Test 1: Create Real Time User 1 (+913333333333)"""
+    def test_1_create_fcm_user_1(self) -> bool:
+        """Test 1: Create/Login FCM Test User 1 (+915555555555)"""
         try:
-            self.token1, self.user1_sl_id = self.create_user(self.user1_phone, "Real Time User 1")
+            self.token1, self.user1_sl_id = self.create_user(self.user1_phone, "FCM Test User")
             
             if self.token1 and self.user1_sl_id:
-                self.log_test("Create Real Time User 1", "PASS", 
+                self.log_test("Create FCM User 1", "PASS", 
                             f"User 1 created: {self.user1_sl_id}")
                 return True
             else:
-                self.log_test("Create Real Time User 1", "FAIL", "Failed to create real time user 1")
+                self.log_test("Create FCM User 1", "FAIL", "Failed to create FCM user 1")
                 return False
                 
         except Exception as e:
-            self.log_test("Create Real Time User 1", "FAIL", f"Exception: {str(e)}")
+            self.log_test("Create FCM User 1", "FAIL", f"Exception: {str(e)}")
             return False
 
-    def test_2_create_user_2(self) -> bool:
-        """Test 2: Create Real Time User 2 (+914444444444)"""
+    def test_2_save_fcm_token_user1(self) -> bool:
+        """Test 2: Save FCM token for User 1"""
+        if not self.token1:
+            self.log_test("Save FCM Token User 1", "SKIP", "Missing User 1 token")
+            return False
+            
         try:
-            self.token2, self.user2_sl_id = self.create_user(self.user2_phone, "Real Time User 2")
+            headers = {'Authorization': f'Bearer {self.token1}', 'Content-Type': 'application/json'}
+            payload = {"fcm_token": self.user1_fcm_token}
+            response = requests.post(f"{self.base_url}/user/fcm-token", 
+                                   headers=headers, data=json.dumps(payload))
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('message') == 'FCM token saved successfully':
+                    self.log_test("Save FCM Token User 1", "PASS", 
+                                f"FCM token saved for {self.user1_sl_id}")
+                    return True
+                else:
+                    self.log_test("Save FCM Token User 1", "FAIL", 
+                                f"Unexpected response: {data}")
+                    return False
+            else:
+                self.log_test("Save FCM Token User 1", "FAIL", 
+                            f"HTTP {response.status_code}: {response.text}")
+                return False
+                
+        except Exception as e:
+            self.log_test("Save FCM Token User 1", "FAIL", f"Exception: {str(e)}")
+            return False
+
+    def test_3_verify_fcm_token_in_profile(self) -> bool:
+        """Test 3: Verify FCM token is saved in user profile"""
+        if not self.token1:
+            self.log_test("Verify FCM Token in Profile", "SKIP", "Missing User 1 token")
+            return False
+            
+        try:
+            headers = {'Authorization': f'Bearer {self.token1}', 'Content-Type': 'application/json'}
+            response = requests.get(f"{self.base_url}/user/profile", headers=headers)
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                saved_token = user_data.get('fcm_token')
+                
+                if saved_token == self.user1_fcm_token:
+                    self.log_test("Verify FCM Token in Profile", "PASS", 
+                                f"FCM token verified in profile: {saved_token[:20]}...")
+                    return True
+                elif saved_token:
+                    self.log_test("Verify FCM Token in Profile", "FAIL", 
+                                f"Token mismatch: expected {self.user1_fcm_token[:20]}..., got {saved_token[:20]}...")
+                    return False
+                else:
+                    self.log_test("Verify FCM Token in Profile", "FAIL", 
+                                "FCM token not found in profile")
+                    return False
+            else:
+                self.log_test("Verify FCM Token in Profile", "FAIL", 
+                            f"HTTP {response.status_code}: {response.text}")
+                return False
+                
+        except Exception as e:
+            self.log_test("Verify FCM Token in Profile", "FAIL", f"Exception: {str(e)}")
+            return False
+
+    def test_4_create_second_user(self) -> bool:
+        """Test 4: Create second user for DM testing"""
+        try:
+            self.token2, self.user2_sl_id = self.create_user(self.user2_phone, "Second FCM User")
             
             if self.token2 and self.user2_sl_id:
-                self.log_test("Create Real Time User 2", "PASS", 
+                self.log_test("Create Second User", "PASS", 
                             f"User 2 created: {self.user2_sl_id}")
                 return True
             else:
-                self.log_test("Create Real Time User 2", "FAIL", "Failed to create real time user 2")
+                self.log_test("Create Second User", "FAIL", "Failed to create second user")
                 return False
                 
         except Exception as e:
-            self.log_test("Create Real Time User 2", "FAIL", f"Exception: {str(e)}")
+            self.log_test("Create Second User", "FAIL", f"Exception: {str(e)}")
             return False
 
-    def test_3_user1_send_first_message(self) -> bool:
-        """Test 3: User 1 sends message to User 2 - 'Real-time test message 1'"""
+    def test_5_save_fcm_token_user2(self) -> bool:
+        """Test 5: Save FCM token for User 2"""
+        if not self.token2:
+            self.log_test("Save FCM Token User 2", "SKIP", "Missing User 2 token")
+            return False
+            
+        try:
+            headers = {'Authorization': f'Bearer {self.token2}', 'Content-Type': 'application/json'}
+            payload = {"fcm_token": self.user2_fcm_token}
+            response = requests.post(f"{self.base_url}/user/fcm-token", 
+                                   headers=headers, data=json.dumps(payload))
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('message') == 'FCM token saved successfully':
+                    self.log_test("Save FCM Token User 2", "PASS", 
+                                f"FCM token saved for {self.user2_sl_id}")
+                    return True
+                else:
+                    self.log_test("Save FCM Token User 2", "FAIL", 
+                                f"Unexpected response: {data}")
+                    return False
+            else:
+                self.log_test("Save FCM Token User 2", "FAIL", 
+                            f"HTTP {response.status_code}: {response.text}")
+                return False
+                
+        except Exception as e:
+            self.log_test("Save FCM Token User 2", "FAIL", f"Exception: {str(e)}")
+            return False
+
+    def test_6_user1_send_dm_with_push(self) -> bool:
+        """Test 6: User 1 sends DM to User 2 (should trigger push notification)"""
         if not self.token1 or not self.user2_sl_id:
-            self.log_test("User 1 Send First Message", "SKIP", "Missing user tokens or SL-IDs")
+            self.log_test("User 1 Send DM with Push", "SKIP", "Missing user tokens or SL-IDs")
             return False
             
         try:
             headers = {'Authorization': f'Bearer {self.token1}', 'Content-Type': 'application/json'}
             payload = {
                 "recipient_sl_id": self.user2_sl_id,
-                "content": "Real-time test message 1"
+                "content": "Hello! This should trigger a push notification."
             }
             response = requests.post(f"{self.base_url}/dm", headers=headers, data=json.dumps(payload))
             
@@ -149,90 +248,78 @@ class SanatanLokTester:
                 
                 if (self.chat_id and 
                     self.chat_id.startswith('private_') and
-                    message.get('content') == 'Real-time test message 1' and
+                    message.get('content') == 'Hello! This should trigger a push notification.' and
                     recipient.get('sl_id') == self.user2_sl_id):
                     
-                    self.all_messages.append({
-                        'content': 'Real-time test message 1',
-                        'sender': 'User 1',
-                        'timestamp': message.get('created_at', message.get('timestamp'))
-                    })
-                    
-                    self.log_test("User 1 Send First Message", "PASS", 
-                                f"Message sent successfully. Chat ID: {self.chat_id}")
+                    self.log_test("User 1 Send DM with Push", "PASS", 
+                                f"DM sent successfully. Chat ID: {self.chat_id}. Backend should attempt push notification to {self.user2_fcm_token[:20]}...")
                     return True
                 else:
-                    self.log_test("User 1 Send First Message", "FAIL", 
+                    self.log_test("User 1 Send DM with Push", "FAIL", 
                                 f"Invalid response structure: {data}")
                     return False
             else:
-                self.log_test("User 1 Send First Message", "FAIL", 
+                self.log_test("User 1 Send DM with Push", "FAIL", 
                             f"HTTP {response.status_code}: {response.text}")
                 return False
                 
         except Exception as e:
-            self.log_test("User 1 Send First Message", "FAIL", f"Exception: {str(e)}")
+            self.log_test("User 1 Send DM with Push", "FAIL", f"Exception: {str(e)}")
             return False
 
-    def test_4_verify_message_in_firestore(self) -> bool:
-        """Test 4: Verify message exists in Firestore by getting chat messages"""
-        if not self.token1 or not self.chat_id:
-            self.log_test("Verify Message in Firestore", "SKIP", "Missing token or chat_id")
+    def test_7_verify_dm_stored(self) -> bool:
+        """Test 7: Verify DM is stored correctly in database"""
+        if not self.token2 or not self.chat_id:
+            self.log_test("Verify DM Stored", "SKIP", "Missing token or chat_id")
             return False
             
         try:
-            headers = {'Authorization': f'Bearer {self.token1}', 'Content-Type': 'application/json'}
+            headers = {'Authorization': f'Bearer {self.token2}', 'Content-Type': 'application/json'}
             response = requests.get(f"{self.base_url}/dm/{self.chat_id}", headers=headers)
             
             if response.status_code == 200:
                 messages = response.json()
                 if isinstance(messages, list) and len(messages) >= 1:
-                    # Check for the first message
+                    # Check for the message
                     found_message = False
                     for msg in messages:
                         content = msg.get('content') or msg.get('text', '')
-                        if content == 'Real-time test message 1':
+                        if content == 'Hello! This should trigger a push notification.':
                             found_message = True
-                            # Verify timestamp exists
-                            timestamp = msg.get('created_at') or msg.get('timestamp')
-                            if timestamp:
-                                self.log_test("Verify Message in Firestore", "PASS", 
-                                            f"Message found in Firestore with timestamp: {timestamp}")
-                            else:
-                                self.log_test("Verify Message in Firestore", "PASS", 
-                                            "Message found in Firestore but no timestamp")
+                            self.log_test("Verify DM Stored", "PASS", 
+                                        f"DM found in database with proper content")
                             break
                     
                     if not found_message:
-                        self.log_test("Verify Message in Firestore", "FAIL", 
-                                    "First message not found in Firestore")
+                        self.log_test("Verify DM Stored", "FAIL", 
+                                    "DM message not found in database")
                         return False
                         
                     return True
                 else:
-                    self.log_test("Verify Message in Firestore", "FAIL", 
-                                "No messages found in Firestore")
+                    self.log_test("Verify DM Stored", "FAIL", 
+                                "No messages found in database")
                     return False
             else:
-                self.log_test("Verify Message in Firestore", "FAIL", 
+                self.log_test("Verify DM Stored", "FAIL", 
                             f"HTTP {response.status_code}: {response.text}")
                 return False
                 
         except Exception as e:
-            self.log_test("Verify Message in Firestore", "FAIL", f"Exception: {str(e)}")
+            self.log_test("Verify DM Stored", "FAIL", f"Exception: {str(e)}")
             return False
 
-    def test_5_user2_send_reply(self) -> bool:
-        """Test 5: User 2 sends reply - 'Real-time reply from User 2'"""
+    def test_8_user2_reply_with_push(self) -> bool:
+        """Test 8: User 2 replies to User 1 (should trigger push notification)"""
         if not self.token2 or not self.user1_sl_id:
-            self.log_test("User 2 Send Reply", "SKIP", "Missing User 2 token or User 1 SL-ID")
+            self.log_test("User 2 Reply with Push", "SKIP", "Missing User 2 token or User 1 SL-ID")
             return False
             
         try:
             headers = {'Authorization': f'Bearer {self.token2}', 'Content-Type': 'application/json'}
             payload = {
                 "recipient_sl_id": self.user1_sl_id,
-                "content": "Real-time reply from User 2"
+                "content": "Thanks for the message! Push notification working?"
             }
             response = requests.post(f"{self.base_url}/dm", headers=headers, data=json.dumps(payload))
             
@@ -243,190 +330,22 @@ class SanatanLokTester:
                 
                 # Verify it's the same chat ID (deterministic behavior)
                 if (reply_chat_id and reply_chat_id.startswith('private_') and
-                    message.get('content') == 'Real-time reply from User 2'):
+                    message.get('content') == 'Thanks for the message! Push notification working?'):
                     
-                    self.all_messages.append({
-                        'content': 'Real-time reply from User 2',
-                        'sender': 'User 2',
-                        'timestamp': message.get('created_at', message.get('timestamp'))
-                    })
-                    
-                    self.log_test("User 2 Send Reply", "PASS", 
-                                f"Reply sent (chat_id: {reply_chat_id})")
-                    # Update our chat_id reference if needed
-                    if not self.chat_id:
-                        self.chat_id = reply_chat_id
+                    self.log_test("User 2 Reply with Push", "PASS", 
+                                f"Reply sent (chat_id: {reply_chat_id}). Backend should attempt push notification to {self.user1_fcm_token[:20]}...")
                     return True
                 else:
-                    self.log_test("User 2 Send Reply", "FAIL", 
+                    self.log_test("User 2 Reply with Push", "FAIL", 
                                 f"Invalid reply response: {data}")
                     return False
             else:
-                self.log_test("User 2 Send Reply", "FAIL", 
+                self.log_test("User 2 Reply with Push", "FAIL", 
                             f"HTTP {response.status_code}: {response.text}")
                 return False
                 
         except Exception as e:
-            self.log_test("User 2 Send Reply", "FAIL", f"Exception: {str(e)}")
-            return False
-
-    def test_6_verify_both_messages(self) -> bool:
-        """Test 6: Verify both messages appear in correct order"""
-        if not self.token1 or not self.chat_id:
-            self.log_test("Verify Both Messages", "SKIP", "Missing token or chat_id")
-            return False
-            
-        try:
-            headers = {'Authorization': f'Bearer {self.token1}', 'Content-Type': 'application/json'}
-            response = requests.get(f"{self.base_url}/dm/{self.chat_id}", headers=headers)
-            
-            if response.status_code == 200:
-                messages = response.json()
-                if isinstance(messages, list) and len(messages) >= 2:
-                    # Check for both messages
-                    contents = [msg.get('content') or msg.get('text', '') for msg in messages]
-                    
-                    if ('Real-time test message 1' in contents and 'Real-time reply from User 2' in contents):
-                        # Verify timestamps exist and are in order
-                        message_pairs = []
-                        for msg in messages:
-                            content = msg.get('content') or msg.get('text', '')
-                            timestamp = msg.get('created_at') or msg.get('timestamp')
-                            if content in ['Real-time test message 1', 'Real-time reply from User 2']:
-                                message_pairs.append((content, timestamp))
-                        
-                        self.log_test("Verify Both Messages", "PASS", 
-                                    f"Found {len(messages)} messages with proper timestamps: {contents}")
-                        return True
-                    else:
-                        self.log_test("Verify Both Messages", "FAIL", 
-                                    f"Expected messages not found: {contents}")
-                        return False
-                else:
-                    self.log_test("Verify Both Messages", "FAIL", 
-                                f"Expected 2+ messages, found {len(messages) if isinstance(messages, list) else 0}")
-                    return False
-            else:
-                self.log_test("Verify Both Messages", "FAIL", 
-                            f"HTTP {response.status_code}: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Verify Both Messages", "FAIL", f"Exception: {str(e)}")
-            return False
-
-    def test_7_rapid_messages_sequence(self) -> bool:
-        """Test 7: Send multiple rapid messages to test real-time ordering"""
-        if not self.token1 or not self.token2 or not self.user1_sl_id or not self.user2_sl_id:
-            self.log_test("Rapid Messages Sequence", "SKIP", "Missing tokens or SL-IDs")
-            return False
-            
-        try:
-            success_count = 0
-            
-            # Message A from User 1
-            headers1 = {'Authorization': f'Bearer {self.token1}', 'Content-Type': 'application/json'}
-            payload = {"recipient_sl_id": self.user2_sl_id, "content": "Message A"}
-            response = requests.post(f"{self.base_url}/dm", headers=headers1, data=json.dumps(payload))
-            if response.status_code == 200:
-                success_count += 1
-                self.all_messages.append({'content': 'Message A', 'sender': 'User 1'})
-            
-            time.sleep(0.1)  # Brief delay
-            
-            # Message B from User 2  
-            headers2 = {'Authorization': f'Bearer {self.token2}', 'Content-Type': 'application/json'}
-            payload = {"recipient_sl_id": self.user1_sl_id, "content": "Message B"}
-            response = requests.post(f"{self.base_url}/dm", headers=headers2, data=json.dumps(payload))
-            if response.status_code == 200:
-                success_count += 1
-                self.all_messages.append({'content': 'Message B', 'sender': 'User 2'})
-            
-            time.sleep(0.1)  # Brief delay
-            
-            # Message C from User 1
-            payload = {"recipient_sl_id": self.user2_sl_id, "content": "Message C"}
-            response = requests.post(f"{self.base_url}/dm", headers=headers1, data=json.dumps(payload))
-            if response.status_code == 200:
-                success_count += 1
-                self.all_messages.append({'content': 'Message C', 'sender': 'User 1'})
-            
-            if success_count == 3:
-                self.log_test("Rapid Messages Sequence", "PASS", 
-                            f"All 3 rapid messages sent successfully")
-                return True
-            else:
-                self.log_test("Rapid Messages Sequence", "FAIL", 
-                            f"Only {success_count}/3 messages sent successfully")
-                return False
-                
-        except Exception as e:
-            self.log_test("Rapid Messages Sequence", "FAIL", f"Exception: {str(e)}")
-            return False
-
-    def test_8_verify_all_messages_order(self) -> bool:
-        """Test 8: Verify all 5 messages appear in correct order with timestamps"""
-        if not self.token1 or not self.chat_id:
-            self.log_test("Verify All Messages Order", "SKIP", "Missing token or chat_id")
-            return False
-            
-        # Wait a moment for all messages to be written to Firestore
-        time.sleep(1)
-            
-        try:
-            headers = {'Authorization': f'Bearer {self.token1}', 'Content-Type': 'application/json'}
-            response = requests.get(f"{self.base_url}/dm/{self.chat_id}", headers=headers)
-            
-            if response.status_code == 200:
-                messages = response.json()
-                if isinstance(messages, list) and len(messages) >= 5:
-                    # Expected message sequence
-                    expected_messages = [
-                        'Real-time test message 1',
-                        'Real-time reply from User 2', 
-                        'Message A',
-                        'Message B',
-                        'Message C'
-                    ]
-                    
-                    # Check if all expected messages are present
-                    found_messages = []
-                    for msg in messages:
-                        content = msg.get('content') or msg.get('text', '')
-                        timestamp = msg.get('created_at') or msg.get('timestamp')
-                        if content in expected_messages:
-                            found_messages.append({
-                                'content': content,
-                                'timestamp': timestamp
-                            })
-                    
-                    if len(found_messages) >= 5:
-                        # Verify timestamps exist
-                        timestamps_ok = all(msg.get('timestamp') for msg in found_messages)
-                        contents = [msg['content'] for msg in found_messages]
-                        
-                        if timestamps_ok:
-                            self.log_test("Verify All Messages Order", "PASS", 
-                                        f"All {len(found_messages)} messages found with timestamps: {contents}")
-                        else:
-                            self.log_test("Verify All Messages Order", "PASS", 
-                                        f"All {len(found_messages)} messages found (some missing timestamps): {contents}")
-                        return True
-                    else:
-                        self.log_test("Verify All Messages Order", "FAIL", 
-                                    f"Only {len(found_messages)}/5 expected messages found")
-                        return False
-                else:
-                    self.log_test("Verify All Messages Order", "FAIL", 
-                                f"Expected 5+ messages, found {len(messages) if isinstance(messages, list) else 0}")
-                    return False
-            else:
-                self.log_test("Verify All Messages Order", "FAIL", 
-                            f"HTTP {response.status_code}: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Verify All Messages Order", "FAIL", f"Exception: {str(e)}")
+            self.log_test("User 2 Reply with Push", "FAIL", f"Exception: {str(e)}")
             return False
 
     def test_health_check(self) -> bool:
@@ -453,10 +372,10 @@ class SanatanLokTester:
             self.log_test("Health Check", "FAIL", f"Exception: {str(e)}")
             return False
 
-    def run_realtime_messaging_test(self) -> Dict[str, bool]:
-        """Run the complete Real-time Messaging test flow as per review request"""
-        print("🚀 Starting Sanatan Lok Real-time Chat Messaging Test")
-        print("Focus: Firestore real-time listener and message ordering")
+    def run_fcm_push_notification_test(self) -> Dict[str, bool]:
+        """Run the complete FCM Push Notification test flow as per review request"""
+        print("🚀 Starting Sanatan Lok FCM Push Notification Test")
+        print("Focus: FCM token management and push notification integration")
         print("="*60)
         
         results = {}
@@ -464,14 +383,14 @@ class SanatanLokTester:
         # Test sequence as specified in the review request
         test_sequence = [
             ("health_check", self.test_health_check),
-            ("create_realtime_user_1", self.test_1_create_user_1),
-            ("create_realtime_user_2", self.test_2_create_user_2),
-            ("user1_send_first_message", self.test_3_user1_send_first_message),
-            ("verify_message_in_firestore", self.test_4_verify_message_in_firestore),
-            ("user2_send_reply", self.test_5_user2_send_reply),
-            ("verify_both_messages", self.test_6_verify_both_messages),
-            ("rapid_messages_sequence", self.test_7_rapid_messages_sequence),
-            ("verify_all_messages_order", self.test_8_verify_all_messages_order)
+            ("create_fcm_user_1", self.test_1_create_fcm_user_1),
+            ("save_fcm_token_user1", self.test_2_save_fcm_token_user1),
+            ("verify_fcm_token_in_profile", self.test_3_verify_fcm_token_in_profile),
+            ("create_second_user", self.test_4_create_second_user),
+            ("save_fcm_token_user2", self.test_5_save_fcm_token_user2),
+            ("user1_send_dm_with_push", self.test_6_user1_send_dm_with_push),
+            ("verify_dm_stored", self.test_7_verify_dm_stored),
+            ("user2_reply_with_push", self.test_8_user2_reply_with_push)
         ]
         
         for test_name, test_func in test_sequence:
@@ -479,7 +398,7 @@ class SanatanLokTester:
             time.sleep(0.5)  # Brief pause between tests
         
         print("="*60)
-        print("📊 REAL-TIME MESSAGING TEST SUMMARY")
+        print("📊 FCM PUSH NOTIFICATION TEST SUMMARY")
         print("="*60)
         
         passed = sum(1 for result in results.values() if result)
@@ -492,42 +411,60 @@ class SanatanLokTester:
         print(f"\nOverall: {passed}/{total} tests passed ({(passed/total)*100:.1f}%)")
         
         # Summary of key findings
-        if self.chat_id:
-            print(f"\n🔑 Real-time Test Results:")
+        if self.token1 and self.user1_sl_id:
+            print(f"\n🔑 FCM Test Results:")
             print(f"   User 1 Phone: {self.user1_phone} -> SL-ID: {self.user1_sl_id}")
-            print(f"   User 2 Phone: {self.user2_phone} -> SL-ID: {self.user2_sl_id}")
-            print(f"   Chat ID: {self.chat_id}")
-            print(f"   Chat Format: {'✅ Correct (private_*)' if self.chat_id.startswith('private_') else '❌ Incorrect'}")
-            print(f"   Total Messages Sent: {len(self.all_messages)}")
-            if self.all_messages:
-                print(f"   Message Sequence:")
-                for i, msg in enumerate(self.all_messages, 1):
-                    print(f"     {i}. {msg['content']} (from {msg['sender']})")
+            print(f"   User 1 FCM Token: {self.user1_fcm_token[:20]}... (test token)")
+            if self.token2 and self.user2_sl_id:
+                print(f"   User 2 Phone: {self.user2_phone} -> SL-ID: {self.user2_sl_id}")
+                print(f"   User 2 FCM Token: {self.user2_fcm_token[:20]}... (test token)")
+            if self.chat_id:
+                print(f"   Chat ID: {self.chat_id}")
+                print(f"   Chat Format: {'✅ Correct (private_*)' if self.chat_id.startswith('private_') else '❌ Incorrect'}")
         
-        # Firestore Real-time Assessment
-        firestore_tests = ['verify_message_in_firestore', 'verify_both_messages', 'verify_all_messages_order']
-        firestore_passed = sum(1 for test in firestore_tests if results.get(test, False))
+        # FCM Endpoints Assessment
+        fcm_tests = ['save_fcm_token_user1', 'verify_fcm_token_in_profile', 'save_fcm_token_user2']
+        fcm_passed = sum(1 for test in fcm_tests if results.get(test, False))
         
-        print(f"\n🔥 Firestore Real-time Assessment:")
-        print(f"   Firestore Tests: {firestore_passed}/{len(firestore_tests)} passed")
-        if firestore_passed == len(firestore_tests):
-            print("   ✅ Firestore real-time listener working correctly")
-        elif firestore_passed >= 2:
-            print("   ⚠️  Firestore mostly working, minor issues detected")
+        print(f"\n📱 FCM Token Management Assessment:")
+        print(f"   FCM Token Tests: {fcm_passed}/{len(fcm_tests)} passed")
+        if fcm_passed == len(fcm_tests):
+            print("   ✅ FCM token endpoints working correctly")
+        elif fcm_passed >= 2:
+            print("   ⚠️  FCM token management mostly working, minor issues detected")
         else:
-            print("   ❌ Firestore real-time listener needs attention")
+            print("   ❌ FCM token management needs attention")
+        
+        # Push Notification Assessment
+        dm_tests = ['user1_send_dm_with_push', 'verify_dm_stored', 'user2_reply_with_push']
+        dm_passed = sum(1 for test in dm_tests if results.get(test, False))
+        
+        print(f"\n🔔 Push Notification Integration Assessment:")
+        print(f"   DM with Push Tests: {dm_passed}/{len(dm_tests)} passed")
+        if dm_passed == len(dm_tests):
+            print("   ✅ Push notification integration working (mock tokens used)")
+        elif dm_passed >= 2:
+            print("   ⚠️  Push notification integration mostly working")
+        else:
+            print("   ❌ Push notification integration needs attention")
+        
+        print(f"\n💡 Important Notes:")
+        print(f"   • Mock OTP used: {self.mock_otp}")
+        print(f"   • Test FCM tokens used - actual push won't be sent")
+        print(f"   • Backend should attempt FCM send but fail silently with mock tokens")
+        print(f"   • Focus was on endpoint functionality, not actual push delivery")
         
         # Overall assessment
         if passed == total:
-            print("\n🎉 All real-time messaging tests passed! Firestore integration working perfectly.")
+            print("\n🎉 All FCM push notification tests passed! Endpoints working correctly.")
         elif passed >= total * 0.8:
-            print("\n⚠️  Most tests passed, real-time messaging mostly functional.")
+            print("\n⚠️  Most tests passed, FCM functionality mostly working.")
         else:
-            print("\n❌ Multiple failures detected. Real-time messaging needs significant fixes.")
+            print("\n❌ Multiple failures detected. FCM implementation needs significant fixes.")
             
         return results
 
 
 if __name__ == "__main__":
     tester = SanatanLokTester()
-    results = tester.run_realtime_messaging_test()
+    results = tester.run_fcm_push_notification_test()

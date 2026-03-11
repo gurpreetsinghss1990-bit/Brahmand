@@ -28,6 +28,7 @@ from config.firebase_config import (
 )
 from config.firestore_db import FirestoreDB
 from workers.background_tasks import task_queue
+from services.push_notification_service import push_service
 
 from models.schemas import (
     OTPRequest, OTPVerify, UserCreate, UserUpdate, ProfileUpdate,
@@ -580,6 +581,28 @@ async def get_horoscope(token_data: dict = Depends(verify_token)):
     }
 
 
+@api_router.post("/user/fcm-token")
+async def save_fcm_token(request: dict, token_data: dict = Depends(verify_token)):
+    """
+    Save or update user's FCM token for push notifications
+    
+    Body: { "fcm_token": "your_fcm_token" }
+    """
+    fcm_token = request.get("fcm_token")
+    if not fcm_token:
+        raise HTTPException(status_code=400, detail="FCM token required")
+    
+    user_id = token_data["user_id"]
+    
+    success = await push_service.save_user_fcm_token(user_id, fcm_token)
+    
+    if success:
+        logger.info(f"FCM token saved for user {user_id}")
+        return {"message": "FCM token saved successfully"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save FCM token")
+
+
 # =================== GEOCODE ===================
 
 @api_router.post("/geocode/reverse")
@@ -821,6 +844,17 @@ async def send_dm(message: DirectMessageCreate, token_data: dict = Depends(verif
     
     # Emit via socket
     await sio.emit('new_dm', response_msg, room=chat_id)
+    
+    # Send push notification to recipient
+    try:
+        await push_service.notify_new_dm(
+            recipient_id=recipient_id,
+            sender_name=sender['name'],
+            message_preview=message.content,
+            chat_id=chat_id
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send push notification: {e}")
     
     return {
         "message": response_msg,
