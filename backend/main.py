@@ -391,11 +391,17 @@ async def register_user(user_data: UserCreate, _: bool = Depends(auth_rate_limit
     while await db.get_user_by_sl_id(sl_id):
         sl_id = generate_sl_id()
     
+    # Handle photo - truncate if too large for Firestore (max ~1MB)
+    photo_data = user_data.photo
+    if photo_data and len(photo_data) > 900000:  # ~900KB limit for safety
+        logger.warning(f"Photo too large ({len(photo_data)} bytes), storing without photo")
+        photo_data = None  # Don't store oversized photos
+    
     user = {
         "phone": user_data.phone,
         "sl_id": sl_id,
         "name": user_data.name,
-        "photo": user_data.photo,
+        "photo": photo_data,
         "language": user_data.language or "English",
         "location": None,
         "home_location": None,

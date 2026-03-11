@@ -32,12 +32,18 @@ export default function ProfileSetupScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.5,
+      quality: 0.3, // Lower quality to reduce file size
       base64: true,
     });
 
     if (!result.canceled && result.assets[0].base64) {
-      setPhoto(`data:image/jpeg;base64,${result.assets[0].base64}`);
+      const base64Data = result.assets[0].base64;
+      // Check if photo is too large (max ~500KB for safety with Firestore)
+      if (base64Data.length > 500000) {
+        alert('Photo is too large. Please choose a smaller image or take a new photo.');
+        return;
+      }
+      setPhoto(`data:image/jpeg;base64,${base64Data}`);
     }
   };
 
