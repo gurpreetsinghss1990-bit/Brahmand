@@ -240,7 +240,7 @@ async def verify_otp(request: OTPVerify, _: bool = Depends(auth_rate_limit)):
     
     # Check if user exists
     user = await db.get_user_by_phone(request.phone)
-    if user:
+    if user and user.get('sl_id'):
         token = create_jwt_token(user['id'], user['sl_id'])
         return {
             "message": "Login successful",
