@@ -144,7 +144,7 @@ backend:
   - task: "Location Setup & Community Join"
     implemented: true
     working: true
-    file: "server.py"
+    file: "main.py"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
@@ -155,6 +155,9 @@ backend:
       - working: true
         agent: "testing"
         comment: "Location setup tested. Creates 4 communities (Andheri, Mumbai, Maharashtra, Bharat) automatically when user sets location. Community auto-join working correctly."
+      - working: true
+        agent: "testing"
+        comment: "Post-fork testing completed. POST /api/user/dual-location creates 4 communities (area/city/state/country) and joins user automatically. Full sign-up flow verified: OTP -> Register -> Reverse Geocode -> Dual Location -> Communities. All working with Firebase/Firestore backend."
       - working: true
         agent: "testing"
         comment: "Dual location setup tested and working. POST /api/user/dual-location successfully creates 4 communities (area/city/state/country levels) and joins user automatically. Community creation and membership working correctly."
