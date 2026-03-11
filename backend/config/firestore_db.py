@@ -1,71 +1,43 @@
-"""Firestore Database Operations Layer"""
+"""Firestore Database Operations Layer using Sync Client"""
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from google.cloud.firestore_v1 import AsyncClient, FieldFilter, Query
-from google.cloud import firestore
+import asyncio
+from functools import partial
 
 logger = logging.getLogger(__name__)
 
 
 class FirestoreDB:
     """
-    Firestore database operations wrapper.
-    Provides MongoDB-like interface for easier migration.
+    Firestore database operations wrapper using sync client.
+    Uses run_in_executor for async operations.
     
     Collections:
     - users
     - communities  
     - chats (with subcollection: messages)
-    - groups
+    - groups / circles
     - temples
     - events
     - vendors
+    - otps
+    - notifications
     """
     
-    def __init__(self, client: AsyncClient):
+    def __init__(self, client):
         self.client = client
+        self._loop = None
     
-    # =================== COLLECTION REFERENCES ===================
+    def _get_loop(self):
+        if self._loop is None:
+            self._loop = asyncio.get_event_loop()
+        return self._loop
     
-    def users(self):
-        return self.client.collection('users')
-    
-    def communities(self):
-        return self.client.collection('communities')
-    
-    def chats(self):
-        return self.client.collection('chats')
-    
-    def groups(self):
-        return self.client.collection('groups')
-    
-    def temples(self):
-        return self.client.collection('temples')
-    
-    def events(self):
-        return self.client.collection('events')
-    
-    def vendors(self):
-        return self.client.collection('vendors')
-    
-    def otps(self):
-        return self.client.collection('otps')
-    
-    def circles(self):
-        return self.client.collection('circles')
-    
-    def notifications(self):
-        return self.client.collection('notifications')
-    
-    def verifications(self):
-        return self.client.collection('verifications')
-    
-    # =================== CHAT MESSAGES (Subcollection) ===================
-    
-    def chat_messages(self, chat_id: str):
-        """Get messages subcollection for a chat"""
-        return self.client.collection('chats').document(chat_id).collection('messages')
+    async def _run_sync(self, func, *args, **kwargs):
+        """Run sync function in executor"""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, partial(func, *args, **kwargs))
     
     # =================== GENERIC OPERATIONS ===================
     
@@ -74,34 +46,46 @@ class FirestoreDB:
         data['created_at'] = datetime.utcnow()
         data['updated_at'] = datetime.utcnow()
         
-        collection_ref = self.client.collection(collection)
+        def _create():
+            coll = self.client.collection(collection)
+            if doc_id:
+                coll.document(doc_id).set(data)
+                return doc_id
+            else:
+                _, doc_ref = coll.add(data)
+                return doc_ref.id
         
-        if doc_id:
-            await collection_ref.document(doc_id).set(data)
-            return doc_id
-        else:
-            doc_ref = await collection_ref.add(data)
-            return doc_ref[1].id
+        return await self._run_sync(_create)
     
     async def get_document(self, collection: str, doc_id: str) -> Optional[Dict[str, Any]]:
         """Get a document by ID"""
-        doc = await self.client.collection(collection).document(doc_id).get()
-        if doc.exists:
-            data = doc.to_dict()
-            data['id'] = doc.id
-            return data
-        return None
+        def _get():
+            doc = self.client.collection(collection).document(doc_id).get()
+            if doc.exists:
+                data = doc.to_dict()
+                data['id'] = doc.id
+                return data
+            return None
+        
+        return await self._run_sync(_get)
     
     async def update_document(self, collection: str, doc_id: str, data: Dict[str, Any]) -> bool:
         """Update a document"""
         data['updated_at'] = datetime.utcnow()
-        await self.client.collection(collection).document(doc_id).update(data)
-        return True
+        
+        def _update():
+            self.client.collection(collection).document(doc_id).update(data)
+            return True
+        
+        return await self._run_sync(_update)
     
     async def delete_document(self, collection: str, doc_id: str) -> bool:
         """Delete a document"""
-        await self.client.collection(collection).document(doc_id).delete()
-        return True
+        def _delete():
+            self.client.collection(collection).document(doc_id).delete()
+            return True
+        
+        return await self._run_sync(_delete)
     
     async def query_documents(
         self, 
@@ -112,28 +96,34 @@ class FirestoreDB:
         limit: int = None
     ) -> List[Dict[str, Any]]:
         """Query documents with filters"""
-        query = self.client.collection(collection)
+        def _query():
+            from google.cloud.firestore_v1.base_query import FieldFilter
+            from google.cloud import firestore
+            
+            query = self.client.collection(collection)
+            
+            if filters:
+                for field, op, value in filters:
+                    query = query.where(filter=FieldFilter(field, op, value))
+            
+            if order_by:
+                direction = firestore.Query.DESCENDING if order_direction == 'DESCENDING' else firestore.Query.ASCENDING
+                query = query.order_by(order_by, direction=direction)
+            
+            if limit:
+                query = query.limit(limit)
+            
+            docs = query.stream()
+            
+            result = []
+            for doc in docs:
+                data = doc.to_dict()
+                data['id'] = doc.id
+                result.append(data)
+            
+            return result
         
-        if filters:
-            for field, op, value in filters:
-                query = query.where(filter=FieldFilter(field, op, value))
-        
-        if order_by:
-            direction = Query.DESCENDING if order_direction == 'DESCENDING' else Query.ASCENDING
-            query = query.order_by(order_by, direction=direction)
-        
-        if limit:
-            query = query.limit(limit)
-        
-        docs = await query.get()
-        
-        result = []
-        for doc in docs:
-            data = doc.to_dict()
-            data['id'] = doc.id
-            result.append(data)
-        
-        return result
+        return await self._run_sync(_query)
     
     async def find_one(self, collection: str, filters: List[tuple]) -> Optional[Dict[str, Any]]:
         """Find a single document matching filters"""
@@ -142,16 +132,19 @@ class FirestoreDB:
     
     async def count_documents(self, collection: str, filters: List[tuple] = None) -> int:
         """Count documents matching filters"""
-        query = self.client.collection(collection)
+        def _count():
+            from google.cloud.firestore_v1.base_query import FieldFilter
+            
+            query = self.client.collection(collection)
+            
+            if filters:
+                for field, op, value in filters:
+                    query = query.where(filter=FieldFilter(field, op, value))
+            
+            # Stream and count
+            return sum(1 for _ in query.stream())
         
-        if filters:
-            for field, op, value in filters:
-                query = query.where(filter=FieldFilter(field, op, value))
-        
-        # Use aggregation for counting
-        count_query = query.count()
-        result = await count_query.get()
-        return result[0][0].value
+        return await self._run_sync(_count)
     
     # =================== USER OPERATIONS ===================
     
@@ -183,23 +176,57 @@ class FirestoreDB:
     
     async def add_member_to_community(self, community_id: str, user_id: str):
         """Add a member to community"""
-        await self.client.collection('communities').document(community_id).update({
-            'members': firestore.ArrayUnion([user_id])
-        })
+        def _add():
+            from google.cloud import firestore
+            self.client.collection('communities').document(community_id).update({
+                'members': firestore.ArrayUnion([user_id])
+            })
+        
+        await self._run_sync(_add)
+    
+    async def array_union_update(self, collection: str, doc_id: str, field: str, values: list):
+        """Update a document field with ArrayUnion"""
+        def _update():
+            from google.cloud import firestore
+            self.client.collection(collection).document(doc_id).update({
+                field: firestore.ArrayUnion(values)
+            })
+        
+        await self._run_sync(_update)
+    
+    async def set_document(self, collection: str, doc_id: str, data: Dict[str, Any]):
+        """Set a document with specific ID"""
+        data['created_at'] = datetime.utcnow()
+        data['updated_at'] = datetime.utcnow()
+        
+        def _set():
+            self.client.collection(collection).document(doc_id).set(data)
+        
+        await self._run_sync(_set)
     
     # =================== CHAT OPERATIONS ===================
     
-    async def create_chat(self, chat_data: Dict[str, Any]) -> str:
+    async def create_chat(self, chat_data: Dict[str, Any], chat_id: str = None) -> str:
         """Create a new chat"""
+        if chat_id:
+            def _create():
+                self.client.collection('chats').document(chat_id).set(chat_data)
+                return chat_id
+            return await self._run_sync(_create)
         return await self.create_document('chats', chat_data)
     
     async def add_message_to_chat(self, chat_id: str, message_data: Dict[str, Any]) -> str:
         """Add a message to chat's messages subcollection"""
+        from google.cloud import firestore
+        
         message_data['created_at'] = datetime.utcnow()
         message_data['timestamp'] = firestore.SERVER_TIMESTAMP
         
-        doc_ref = await self.chat_messages(chat_id).add(message_data)
-        return doc_ref[1].id
+        def _add():
+            _, doc_ref = self.client.collection('chats').document(chat_id).collection('messages').add(message_data)
+            return doc_ref.id
+        
+        return await self._run_sync(_add)
     
     async def get_chat_messages(
         self, 
@@ -208,44 +235,24 @@ class FirestoreDB:
         before_timestamp: datetime = None
     ) -> List[Dict[str, Any]]:
         """Get messages from a chat with pagination"""
-        query = self.chat_messages(chat_id).order_by(
-            'created_at', direction=Query.DESCENDING
-        )
+        def _get():
+            from google.cloud import firestore
+            from google.cloud.firestore_v1.base_query import FieldFilter
+            
+            query = self.client.collection('chats').document(chat_id).collection('messages')
+            query = query.order_by('created_at', direction=firestore.Query.DESCENDING)
+            
+            if before_timestamp:
+                query = query.where(filter=FieldFilter('created_at', '<', before_timestamp))
+            
+            query = query.limit(limit)
+            
+            messages = []
+            for doc in query.stream():
+                data = doc.to_dict()
+                data['id'] = doc.id
+                messages.append(data)
+            
+            return list(reversed(messages))  # Chronological order
         
-        if before_timestamp:
-            query = query.where(filter=FieldFilter('created_at', '<', before_timestamp))
-        
-        query = query.limit(limit)
-        
-        docs = await query.get()
-        
-        messages = []
-        for doc in docs:
-            data = doc.to_dict()
-            data['id'] = doc.id
-            messages.append(data)
-        
-        return list(reversed(messages))  # Return in chronological order
-    
-    # =================== REAL-TIME LISTENERS ===================
-    
-    def on_chat_messages(self, chat_id: str, callback):
-        """
-        Subscribe to real-time updates for chat messages.
-        Returns unsubscribe function.
-        """
-        def on_snapshot(docs, changes, read_time):
-            for change in changes:
-                if change.type.name == 'ADDED':
-                    data = change.document.to_dict()
-                    data['id'] = change.document.id
-                    callback('added', data)
-                elif change.type.name == 'MODIFIED':
-                    data = change.document.to_dict()
-                    data['id'] = change.document.id
-                    callback('modified', data)
-                elif change.type.name == 'REMOVED':
-                    callback('removed', {'id': change.document.id})
-        
-        query = self.chat_messages(chat_id).order_by('created_at')
-        return query.on_snapshot(on_snapshot)
+        return await self._run_sync(_get)

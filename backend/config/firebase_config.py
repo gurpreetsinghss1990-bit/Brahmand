@@ -1,7 +1,12 @@
-"""Firebase Configuration and Initialization"""
+"""Firebase Configuration with Service Account"""
 import os
 import logging
-from typing import Optional
+import json
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv(Path(__file__).parent.parent / '.env')
 
 logger = logging.getLogger(__name__)
 
@@ -18,53 +23,68 @@ FIREBASE_WEB_CONFIG = {
 
 
 class FirebaseManager:
-    """
-    Manages Firebase connections.
-    
-    Note: Full Firebase Admin SDK requires a service account key.
-    Without it, we provide the web config for frontend Firebase SDK use.
-    """
+    """Manages Firebase Admin SDK with Firestore"""
     
     def __init__(self):
         self.app = None
         self.db = None
         self._initialized = False
-        self.project_id = FIREBASE_WEB_CONFIG["projectId"]
+        self.project_id = "sanatan-lok"
         self._firebase_available = False
     
     async def initialize(self):
-        """Initialize Firebase if credentials available"""
+        """Initialize Firebase Admin SDK with service account"""
         if self._initialized:
             return
         
         private_key = os.environ.get('FIREBASE_PRIVATE_KEY', '').strip()
         
-        if private_key:
+        if private_key and '-----BEGIN PRIVATE KEY-----' in private_key:
             try:
                 import firebase_admin
                 from firebase_admin import credentials, firestore
                 
+                # Build service account dict
                 service_account = {
                     "type": "service_account",
-                    "project_id": self.project_id,
+                    "project_id": "sanatan-lok",
+                    "private_key_id": "94034ab81b830de80520b8e604b91f77d2cc3179",
                     "private_key": private_key.replace('\\n', '\n'),
-                    "client_email": f"firebase-adminsdk@{self.project_id}.iam.gserviceaccount.com",
+                    "client_email": "firebase-adminsdk-fbsvc@sanatan-lok.iam.gserviceaccount.com",
+                    "client_id": "108982418961258761853",
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                     "token_uri": "https://oauth2.googleapis.com/token",
+                    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40sanatan-lok.iam.gserviceaccount.com",
+                    "universe_domain": "googleapis.com"
                 }
                 
-                cred = credentials.Certificate(service_account)
-                self.app = firebase_admin.initialize_app(cred)
-                self.db = firestore.AsyncClient(project=self.project_id)
+                # Check if already initialized
+                try:
+                    self.app = firebase_admin.get_app()
+                    logger.info("Firebase app already exists")
+                except ValueError:
+                    # Not initialized, create new app with explicit credentials
+                    cred = credentials.Certificate(service_account)
+                    self.app = firebase_admin.initialize_app(cred, {
+                        'projectId': self.project_id
+                    })
+                    logger.info("Firebase app created with service account credentials")
+                
+                # Get Firestore client using firebase_admin (sync client)
+                # We'll use the sync client with async wrappers
+                self.db = firestore.client()
                 self._firebase_available = True
-                logger.info("Firebase Admin SDK initialized with Firestore")
+                
+                logger.info(f"✅ Firebase Admin SDK initialized with Firestore for project: {self.project_id}")
                 
             except Exception as e:
-                logger.warning(f"Firebase Admin SDK init failed: {e}")
-                logger.info("Using MongoDB backend with Firebase web config for frontend")
+                logger.error(f"Firebase initialization error: {e}")
+                import traceback
+                traceback.print_exc()
                 self._firebase_available = False
         else:
-            logger.info("No Firebase service account key - using MongoDB backend")
-            logger.info("Firebase web config available for frontend SDK")
+            logger.warning("Firebase private key not configured - Firestore unavailable")
             self._firebase_available = False
         
         self._initialized = True
@@ -89,8 +109,6 @@ class FirebaseManager:
         return None
     
     async def close(self):
-        if self.db:
-            self.db.close()
         self._initialized = False
         logger.info("Firebase connections closed")
 
@@ -100,7 +118,7 @@ firebase_manager = FirebaseManager()
 
 
 async def get_firestore():
-    """Get Firestore client (or None if not available)"""
+    """Get Firestore client"""
     if not firebase_manager._initialized:
         await firebase_manager.initialize()
     return firebase_manager.get_firestore()
