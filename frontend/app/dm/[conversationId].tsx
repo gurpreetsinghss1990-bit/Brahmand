@@ -1,7 +1,20 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  FlatList, 
+  TextInput, 
+  TouchableOpacity, 
+  KeyboardAvoidingView, 
+  Platform, 
+  ActivityIndicator,
+  Keyboard,
+  InputAccessoryView,
+  Dimensions
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { sendDirectMessage, getConversations, getDirectMessages } from '../../src/services/api';
 import { subscribeToMessages, ChatMessage } from '../../src/services/firebase/chatService';
@@ -10,11 +23,14 @@ import { Conversation } from '../../src/types';
 import { Avatar } from '../../src/components/Avatar';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 
+const INPUT_ACCESSORY_ID = 'chatInputAccessory';
+
 export default function DirectMessageScreen() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const router = useRouter();
   const { user } = useAuthStore();
   const flatListRef = useRef<FlatList>(null);
+  const insets = useSafeAreaInsets();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -22,6 +38,33 @@ export default function DirectMessageScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [isRealtime, setIsRealtime] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // iOS keyboard handling
+  useEffect(() => {
+    const keyboardWillShow = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+        // Scroll to end when keyboard opens
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      }
+    );
+    
+    const keyboardWillHide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        setKeyboardHeight(0);
+      }
+    );
+
+    return () => {
+      keyboardWillShow.remove();
+      keyboardWillHide.remove();
+    };
+  }, []);
 
   // Fetch conversation details (only once)
   const fetchConversation = useCallback(async () => {
@@ -222,7 +265,7 @@ export default function DirectMessageScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.chatContainer}
-        keyboardVerticalOffset={0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <FlatList
           ref={flatListRef}
@@ -230,7 +273,11 @@ export default function DirectMessageScreen() {
           renderItem={renderMessage}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.messagesList}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+          onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="chatbubble-outline" size={48} color={COLORS.textLight} />
@@ -240,8 +287,11 @@ export default function DirectMessageScreen() {
           }
         />
 
-        {/* Input */}
-        <View style={styles.inputContainer}>
+        {/* Input - Fixed at bottom */}
+        <View style={[
+          styles.inputContainer,
+          Platform.OS === 'ios' && { paddingBottom: Math.max(insets.bottom, SPACING.sm) }
+        ]}>
           <TextInput
             style={styles.input}
             placeholder="Type a message..."
@@ -250,6 +300,8 @@ export default function DirectMessageScreen() {
             multiline
             maxLength={1000}
             placeholderTextColor={COLORS.textLight}
+            blurOnSubmit={false}
+            returnKeyType="default"
           />
           <TouchableOpacity
             style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}

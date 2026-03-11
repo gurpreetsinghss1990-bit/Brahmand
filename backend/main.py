@@ -742,7 +742,7 @@ async def send_community_message(
     # Ensure chat exists
     chat = await db.get_document('chats', chat_id)
     if not chat:
-        await db.client.collection('chats').document(chat_id).set({
+        await db.set_document('chats', chat_id, {
             'type': 'community', 'community_id': community_id, 'subgroup_type': subgroup_type
         })
     
@@ -754,16 +754,27 @@ async def send_community_message(
         'sender_sl_id': user.get('sl_id'),
         'content': message.content,
         'message_type': message.message_type.value,
-        'created_at': datetime.utcnow()
+        'created_at': datetime.utcnow().isoformat()
     }
     
-    msg_id = await db.add_message_to_chat(chat_id, msg_data)
-    msg_data['id'] = msg_id
+    msg_id = await db.add_message_to_chat(chat_id, msg_data.copy())
+    
+    # Create clean response data
+    response_data = {
+        'id': msg_id,
+        'sender_id': user['id'],
+        'sender_name': user['name'],
+        'sender_photo': user.get('photo'),
+        'sender_sl_id': user.get('sl_id'),
+        'content': message.content,
+        'message_type': message.message_type.value,
+        'created_at': datetime.utcnow().isoformat()
+    }
     
     # Emit via Socket.IO
-    await sio.emit('new_message', msg_data, room=chat_id)
+    await sio.emit('new_message', response_data, room=chat_id)
     
-    return msg_data
+    return response_data
 
 
 @api_router.get("/messages/community/{community_id}/{subgroup_type}")

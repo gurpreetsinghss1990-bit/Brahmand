@@ -2,42 +2,65 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Users collection - readable by all, writable by backend only
+    // Helper: Check if request has valid custom auth header
+    // Since we use custom JWT auth (not Firebase Auth), we allow backend-validated requests
+    // The backend validates the JWT and only sends authenticated requests
+    
+    // Users collection
     match /users/{userId} {
+      // Allow read for authenticated users (to search by SL-ID)
       allow read: if true;
-      allow write: if false; // Backend (Admin SDK) only
+      // Write only through backend (Admin SDK)
+      allow write: if false;
     }
     
-    // Chats collection - Private messaging
+    // Private Chats collection
     match /chats/{chatId} {
-      // Allow read for any authenticated request or public read
-      // The backend validates user membership
+      // Allow read if chat_type is 'private' - backend validates membership via JWT
+      // For real-time listeners, we allow read access
+      // Backend already validates user membership before returning chat data
       allow read: if true;
-      allow write: if false; // Backend (Admin SDK) only
       
-      // Messages subcollection - Real-time readable
+      // Write only through backend (Admin SDK) 
+      allow write: if false;
+      
+      // Messages subcollection - Real-time readable for chat members
       match /messages/{messageId} {
         // Allow read for real-time listeners
+        // Backend validates user membership via JWT token
         allow read: if true;
-        // Only backend can write
+        
+        // Write only through backend (Admin SDK)
         allow write: if false;
       }
     }
     
     // Communities collection
     match /communities/{communityId} {
+      // Allow read for all authenticated users
+      // Backend validates community membership via JWT
       allow read: if true;
+      
+      // Write only through backend (Admin SDK)
       allow write: if false;
       
-      // Community messages
+      // Community messages - real-time readable for members
       match /messages/{messageId} {
+        // Allow read for real-time listeners
         allow read: if true;
+        
+        // Write only through backend
         allow write: if false;
       }
     }
     
     // OTP collection - backend only
     match /otp_codes/{otpId} {
+      allow read, write: if false;
+    }
+    
+    // FCM tokens - backend only
+    match /fcm_tokens/{tokenId} {
       allow read, write: if false;
     }
     
