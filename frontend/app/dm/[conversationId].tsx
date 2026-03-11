@@ -6,12 +6,11 @@ import {
   FlatList, 
   TextInput, 
   TouchableOpacity, 
-  KeyboardAvoidingView, 
   Platform, 
   ActivityIndicator,
   Keyboard,
-  InputAccessoryView,
-  Dimensions
+  Dimensions,
+  ScrollView
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,7 +22,7 @@ import { Conversation } from '../../src/types';
 import { Avatar } from '../../src/components/Avatar';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 
-const INPUT_ACCESSORY_ID = 'chatInputAccessory';
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export default function DirectMessageScreen() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
@@ -31,6 +30,7 @@ export default function DirectMessageScreen() {
   const { user } = useAuthStore();
   const flatListRef = useRef<FlatList>(null);
   const insets = useSafeAreaInsets();
+  const inputRef = useRef<TextInput>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -38,32 +38,62 @@ export default function DirectMessageScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [isRealtime, setIsRealtime] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(SCREEN_HEIGHT);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
-  // iOS keyboard handling
+  // Handle iOS Safari visual viewport changes (keyboard open/close)
   useEffect(() => {
-    const keyboardWillShow = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      (e) => {
-        setKeyboardHeight(e.endCoordinates.height);
-        // Scroll to end when keyboard opens
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-      }
-    );
-    
-    const keyboardWillHide = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => {
-        setKeyboardHeight(0);
-      }
-    );
+    if (Platform.OS === 'web') {
+      // Use visualViewport API for iOS Safari
+      const handleResize = () => {
+        if (typeof window !== 'undefined' && window.visualViewport) {
+          const newHeight = window.visualViewport.height;
+          setViewportHeight(newHeight);
+          setIsKeyboardVisible(newHeight < SCREEN_HEIGHT * 0.75);
+          
+          // Scroll to bottom when keyboard opens
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 100);
+        }
+      };
 
-    return () => {
-      keyboardWillShow.remove();
-      keyboardWillHide.remove();
-    };
+      if (typeof window !== 'undefined' && window.visualViewport) {
+        window.visualViewport.addEventListener('resize', handleResize);
+        window.visualViewport.addEventListener('scroll', handleResize);
+        handleResize(); // Initial call
+      }
+
+      return () => {
+        if (typeof window !== 'undefined' && window.visualViewport) {
+          window.visualViewport.removeEventListener('resize', handleResize);
+          window.visualViewport.removeEventListener('scroll', handleResize);
+        }
+      };
+    } else {
+      // Native keyboard handling
+      const keyboardWillShow = Keyboard.addListener(
+        Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+        (e) => {
+          setIsKeyboardVisible(true);
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 100);
+        }
+      );
+      
+      const keyboardWillHide = Keyboard.addListener(
+        Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+        () => {
+          setIsKeyboardVisible(false);
+        }
+      );
+
+      return () => {
+        keyboardWillShow.remove();
+        keyboardWillHide.remove();
+      };
+    }
   }, []);
 
   // Fetch conversation details (only once)
@@ -120,7 +150,6 @@ export default function DirectMessageScreen() {
     fetchMessagesViaAPI();
     
     // Set up real-time Firestore listener for messages
-    // Path: chats/{chatId}/messages
     try {
       unsubscribe = subscribeToMessages(
         conversationId!,
@@ -167,7 +196,7 @@ export default function DirectMessageScreen() {
       }
     }, 3000);
 
-    // Cleanup: unsubscribe from Firestore listener when leaving screen
+    // Cleanup
     return () => {
       console.log('[Chat] Cleanup: unsubscribing from chat:', conversationId);
       if (unsubscribe) {
@@ -189,7 +218,6 @@ export default function DirectMessageScreen() {
     try {
       await sendDirectMessage(conversation.user.sl_id, messageText);
       // Always fetch after sending to ensure message appears
-      // Real-time listener will also pick it up if working
       setTimeout(() => fetchMessagesViaAPI(), 300);
     } catch (error: any) {
       // Restore the message if sending failed
@@ -235,88 +263,100 @@ export default function DirectMessageScreen() {
     );
   }
 
+  // Calculate container height for web (iOS Safari fix)
+  const containerStyle = Platform.OS === 'web' 
+    ? [styles.container, { height: viewportHeight, maxHeight: viewportHeight }]
+    : styles.container;
+
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-        </TouchableOpacity>
-        {conversation && (
-          <>
-            <Avatar name={conversation.user.name} photo={conversation.user.photo} size={40} />
-            <View style={styles.headerInfo}>
-              <Text style={styles.headerTitle}>{conversation.user.name}</Text>
-              <View style={styles.statusRow}>
-                <Text style={styles.headerSubtitle}>{conversation.user.sl_id}</Text>
-                {isRealtime && (
-                  <View style={styles.realtimeBadge}>
-                    <View style={styles.realtimeDot} />
-                    <Text style={styles.realtimeText}>Live</Text>
-                  </View>
-                )}
-              </View>
-            </View>
-          </>
-        )}
-      </View>
-
-      {/* Messages */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.chatContainer}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.messagesList}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-          onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="chatbubble-outline" size={48} color={COLORS.textLight} />
-              <Text style={styles.emptyText}>Start your conversation</Text>
-              <Text style={styles.emptySubtext}>Messages will appear in real-time</Text>
-            </View>
-          }
-        />
-
-        {/* Input - Fixed at bottom */}
-        <View style={[
-          styles.inputContainer,
-          Platform.OS === 'ios' && { paddingBottom: Math.max(insets.bottom, SPACING.sm) }
-        ]}>
-          <TextInput
-            style={styles.input}
-            placeholder="Type a message..."
-            value={newMessage}
-            onChangeText={setNewMessage}
-            multiline
-            maxLength={1000}
-            placeholderTextColor={COLORS.textLight}
-            blurOnSubmit={false}
-            returnKeyType="default"
-          />
-          <TouchableOpacity
-            style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}
-            onPress={handleSend}
-            disabled={!newMessage.trim() || sending}
-          >
-            {sending ? (
-              <ActivityIndicator size="small" color={COLORS.textWhite} />
-            ) : (
-              <Ionicons name="send" size={20} color={COLORS.textWhite} />
-            )}
+    <View style={containerStyle}>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
+          {conversation && (
+            <>
+              <Avatar name={conversation.user.name} photo={conversation.user.photo} size={40} />
+              <View style={styles.headerInfo}>
+                <Text style={styles.headerTitle}>{conversation.user.name}</Text>
+                <View style={styles.statusRow}>
+                  <Text style={styles.headerSubtitle}>{conversation.user.sl_id}</Text>
+                  {isRealtime && (
+                    <View style={styles.realtimeBadge}>
+                      <View style={styles.realtimeDot} />
+                      <Text style={styles.realtimeText}>Live</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </>
+          )}
         </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+
+        {/* Chat Content - Messages + Input */}
+        <View style={styles.chatContent}>
+          {/* Messages List */}
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            renderItem={renderMessage}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.messagesList}
+            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            showsVerticalScrollIndicator={true}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="chatbubble-outline" size={48} color={COLORS.textLight} />
+                <Text style={styles.emptyText}>Start your conversation</Text>
+                <Text style={styles.emptySubtext}>Messages will appear in real-time</Text>
+              </View>
+            }
+          />
+
+          {/* Input Container - Fixed at bottom */}
+          <View style={[
+            styles.inputContainer,
+            Platform.OS === 'web' && styles.inputContainerWeb,
+            { paddingBottom: Platform.OS === 'web' ? SPACING.sm : Math.max(insets.bottom, SPACING.sm) }
+          ]}>
+            <TextInput
+              ref={inputRef}
+              style={styles.input}
+              placeholder="Type a message..."
+              value={newMessage}
+              onChangeText={setNewMessage}
+              multiline
+              maxLength={1000}
+              placeholderTextColor={COLORS.textLight}
+              blurOnSubmit={false}
+              returnKeyType="default"
+              onFocus={() => {
+                // Scroll to end when input focused
+                setTimeout(() => {
+                  flatListRef.current?.scrollToEnd({ animated: true });
+                }, 300);
+              }}
+            />
+            <TouchableOpacity
+              style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}
+              onPress={handleSend}
+              disabled={!newMessage.trim() || sending}
+            >
+              {sending ? (
+                <ActivityIndicator size="small" color={COLORS.textWhite} />
+              ) : (
+                <Ionicons name="send" size={20} color={COLORS.textWhite} />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -324,6 +364,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+    // For web: prevent overflow
+    ...(Platform.OS === 'web' && {
+      overflow: 'hidden',
+      position: 'relative' as const,
+    }),
+  },
+  safeArea: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
   },
   loadingContainer: {
     flex: 1,
@@ -343,9 +393,11 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.divider,
+    flexShrink: 0,
   },
   backButton: {
     marginRight: SPACING.md,
+    padding: 4,
   },
   headerInfo: {
     flex: 1,
@@ -386,8 +438,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#4CAF50',
   },
-  chatContainer: {
+  chatContent: {
     flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
   },
   messagesList: {
     padding: SPACING.md,
@@ -453,9 +508,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     padding: SPACING.md,
+    paddingTop: SPACING.sm,
     backgroundColor: COLORS.surface,
     borderTopWidth: 1,
     borderTopColor: COLORS.divider,
+    flexShrink: 0,
+  },
+  inputContainerWeb: {
+    // Ensure input stays visible on iOS Safari
+    position: 'relative' as const,
+    bottom: 0,
+    left: 0,
+    right: 0,
   },
   input: {
     flex: 1,
@@ -466,6 +530,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.text,
     maxHeight: 100,
+    minHeight: 40,
   },
   sendButton: {
     width: 44,
