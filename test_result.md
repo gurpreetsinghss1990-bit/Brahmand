@@ -356,6 +356,9 @@ backend:
       - working: true
         agent: "testing"
         comment: "NEW FEATURE: Message status functionality fully working. DMs start with status 'delivered' and change to 'read' when marked via POST /api/dm/{chat_id}/read. Status field properly included in message responses. Read tracking working correctly with read_by array."
+      - working: true
+        agent: "testing"
+        comment: "COMPREHENSIVE RE-TEST: Message status and read receipts functionality extensively tested per review request. Complete flow verified: User A (+919999991111 -> SL-805881) and User B (+919999992222 -> SL-355416) created successfully. Message sent with initial 'delivered' status. User B marked messages as read successfully. Message status correctly changed to 'read'. Privacy settings tested: read_receipts disabled blocks status updates. Second message remained 'delivered' when receipts disabled. All backend endpoints working correctly: POST /api/dm, GET /api/dm/{chat_id}, POST /api/dm/{chat_id}/read, PUT /api/user/privacy-settings. Status transitions working as expected: delivered -> read (when enabled), delivered only (when disabled)."
 
   - task: "Privacy Settings (Read Receipts)"
     implemented: true
@@ -368,6 +371,9 @@ backend:
       - working: true
         agent: "testing"
         comment: "NEW FEATURE: Privacy settings fully functional. GET /api/user/privacy-settings returns default settings (read_receipts: true, online_status: true, profile_photo: 'everyone'). PUT /api/user/privacy-settings updates correctly. When read_receipts disabled, mark-as-read returns 'Read receipts disabled' and respects user privacy."
+      - working: true
+        agent: "testing"
+        comment: "RE-TEST COMPLETE: Privacy settings and read receipts blocking verified. PUT /api/user/privacy-settings successfully disables read_receipts. POST /api/dm/{chat_id}/read correctly returns 'Read receipts disabled' when user has disabled the feature. Privacy enforcement working correctly - messages remain with 'delivered' status when receipts are disabled. User privacy respected as intended."
 
   - task: "Temples & Events APIs"
     implemented: true
@@ -562,3 +568,5 @@ agent_communication:
     message: "🚀 BETA LAUNCH VERIFICATION COMPLETE: All 12/12 comprehensive tests passed (100% success rate). FLOW 1 - New User Signup & Auto-Community Assignment: ✅ Perfect (7/7 tests passed). Complete signup with OTP (+917777777777 -> SL-961768), reverse geocoding for Delhi coordinates (28.6139, 77.2090), dual location setup creating 4 communities (Bharat Group, New Delhi Group, Connaught Place Group, Delhi Group), and auto-join functionality verified. FLOW 2 - Private Chat: ✅ Perfect (3/3 tests passed). DM creation between users working with deterministic chat ID format (private_*), message persistence, and conversation retrieval. FLOW 3 - Community Chat: ✅ Perfect (2/2 tests passed). Community messaging to 'chat' subgroup working, message sending and retrieval functional. CRITICAL FIX APPLIED: Fixed community messaging endpoint serialization issue with Firestore timestamps. Backend v2.2.0 with Firestore ready for beta launch."
   - agent: "testing"
     message: "🎯 NEW FEATURES TESTING COMPLETE: All 10/10 tests passed (100% success rate). ✅ MESSAGE STATUS (DELIVERED/READ): Full implementation working - DMs start with status 'delivered', change to 'read' via POST /api/dm/{chat_id}/read. Status field properly included in responses. ✅ PRIVACY SETTINGS: Complete functionality - GET /api/user/privacy-settings returns defaults (read_receipts: true), PUT updates correctly, disabled read_receipts properly blocks read status updates. ✅ EXISTING FEATURES: Health check, communities, DM conversations all confirmed working. Comprehensive test suite verified users +917771111111 (SL-486700) and +917772222222 (SL-656717). Chat ID: private_K4BARESAjPZ58WUGipAV_VsMpBMLF9Akz4O5CNpHc. All new features production-ready."
+  - agent: "testing"
+    message: "📲 MESSAGE STATUS & READ RECEIPTS VERIFICATION: Testing completed per user review request. Comprehensive 9-step test flow executed: ✅ User creation (A: SL-805881, B: SL-355416), ✅ Message sending with 'delivered' status, ✅ Read receipt marking functionality, ✅ Status transition to 'read', ✅ Privacy settings (read_receipts disable), ✅ Read receipt blocking when disabled. Backend logs confirm all API calls successful (200 OK responses). Key endpoints verified: POST /api/dm (message sending), GET /api/dm/{chat_id} (status checking), POST /api/dm/{chat_id}/read (mark as read), PUT /api/user/privacy-settings (privacy controls). Message status transitions working correctly: delivered -> read (when enabled), delivered only (when disabled). Privacy enforcement functional - respects user read_receipts setting."

@@ -250,6 +250,48 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {/* Settings Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Settings</Text>
+        <View style={styles.settingsCard}>
+          <TouchableOpacity 
+            style={styles.settingsItem}
+            onPress={() => router.push('/settings/privacy')}
+          >
+            <View style={[styles.settingsIcon, { backgroundColor: `${COLORS.primary}15` }]}>
+              <Ionicons name="shield-checkmark" size={20} color={COLORS.primary} />
+            </View>
+            <View style={styles.settingsInfo}>
+              <Text style={styles.settingsLabel}>Privacy Settings</Text>
+              <Text style={styles.settingsDesc}>Read receipts, online status</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.settingsItem}>
+            <View style={[styles.settingsIcon, { backgroundColor: `${COLORS.secondary}15` }]}>
+              <Ionicons name="notifications" size={20} color={COLORS.secondary} />
+            </View>
+            <View style={styles.settingsInfo}>
+              <Text style={styles.settingsLabel}>Notifications</Text>
+              <Text style={styles.settingsDesc}>Push notifications, alerts</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.settingsItem}>
+            <View style={[styles.settingsIcon, { backgroundColor: `${COLORS.accent}15` }]}>
+              <Ionicons name="help-circle" size={20} color={COLORS.accent} />
+            </View>
+            <View style={styles.settingsInfo}>
+              <Text style={styles.settingsLabel}>Help & Support</Text>
+              <Text style={styles.settingsDesc}>FAQs, contact us</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Logout Button */}
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
         <Ionicons name="log-out" size={20} color={COLORS.error} />
@@ -552,6 +594,40 @@ const styles = StyleSheet.create({
   },
   copyButton: {
     padding: SPACING.xs,
+  },
+  // Settings styles
+  settingsCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
+  },
+  settingsItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  settingsIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.md,
+  },
+  settingsInfo: {
+    flex: 1,
+  },
+  settingsLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: COLORS.text,
+  },
+  settingsDesc: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 2,
   },
   logoutButton: {
     flexDirection: 'row',

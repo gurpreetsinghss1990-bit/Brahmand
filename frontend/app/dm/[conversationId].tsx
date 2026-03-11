@@ -20,6 +20,7 @@ import { useAuthStore } from '../../src/store/authStore';
 import { Conversation } from '../../src/types';
 import { Avatar } from '../../src/components/Avatar';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
+import api from '../../src/services/api';
 
 export default function DirectMessageScreen() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
@@ -35,6 +36,20 @@ export default function DirectMessageScreen() {
   const [sending, setSending] = useState(false);
   const [isRealtime, setIsRealtime] = useState(false);
   const [viewHeight, setViewHeight] = useState(Dimensions.get('window').height);
+  const [hasMarkedRead, setHasMarkedRead] = useState(false);
+
+  // Mark messages as read when opening chat
+  const markMessagesAsRead = useCallback(async () => {
+    if (!conversationId || hasMarkedRead) return;
+    
+    try {
+      await api.post(`/dm/${conversationId}/read`);
+      setHasMarkedRead(true);
+      console.log('[Chat] Messages marked as read');
+    } catch (error) {
+      console.error('[Chat] Error marking messages as read:', error);
+    }
+  }, [conversationId, hasMarkedRead]);
 
   // Handle viewport resize for iOS Safari keyboard
   useEffect(() => {
@@ -125,6 +140,8 @@ export default function DirectMessageScreen() {
             pollingInterval = null;
           }
           setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+          // Mark messages as read when received
+          markMessagesAsRead();
         },
         () => {
           if (!pollingInterval) {
@@ -142,11 +159,14 @@ export default function DirectMessageScreen() {
       }
     }, 3000);
 
+    // Mark messages as read after initial load
+    setTimeout(() => markMessagesAsRead(), 1000);
+
     return () => {
       if (unsubscribe) unsubscribe();
       if (pollingInterval) clearInterval(pollingInterval);
     };
-  }, [conversationId, fetchConversation, fetchMessagesViaAPI]);
+  }, [conversationId, fetchConversation, fetchMessagesViaAPI, markMessagesAsRead]);
 
   const handleSend = async () => {
     if (!newMessage.trim() || !conversation) return;
