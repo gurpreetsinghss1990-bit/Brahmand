@@ -111,4 +111,71 @@ export const getDirectMessages = (conversationId: string, limit: number = 50) =>
 export const discoverCommunities = () => 
   api.get('/discover/communities');
 
+// Wisdom & Panchang APIs
+export const getTodaysWisdom = () => 
+  api.get('/wisdom/today');
+
+export const getTodaysPanchang = () => 
+  api.get('/panchang/today');
+
+// Temple APIs
+export const getTemples = () => 
+  api.get('/temples');
+
+export const getNearbyTemples = (lat?: number, lng?: number) => 
+  api.get(`/temples/nearby${lat && lng ? `?lat=${lat}&lng=${lng}` : ''}`);
+
+export const getTemple = (templeId: string) => 
+  api.get(`/temples/${templeId}`);
+
+export const followTemple = (templeId: string) => 
+  api.post(`/temples/${templeId}/follow`);
+
+export const unfollowTemple = (templeId: string) => 
+  api.post(`/temples/${templeId}/unfollow`);
+
+export const getTemplePosts = (templeId: string) => 
+  api.get(`/temples/${templeId}/posts`);
+
+export const reactToTemplePost = (templeId: string, postId: string, reaction: string) => 
+  api.post(`/temples/${templeId}/posts/${postId}/react`, { reaction });
+
+// Event APIs
+export const getEvents = () => 
+  api.get('/events');
+
+export const getNearbyEvents = () => 
+  api.get('/events/nearby');
+
+export const attendEvent = (eventId: string) => 
+  api.post(`/events/${eventId}/attend`);
+
+// Verification APIs
+export const getVerificationStatus = () => 
+  api.get('/user/verification-status');
+
+export const requestVerification = (data: { full_name: string; id_type: string; id_number: string }) => 
+  api.post('/user/request-verification', data);
+
+// Profile APIs
+export const updateExtendedProfile = (data: {
+  kuldevi?: string;
+  kuldevi_temple_area?: string;
+  gotra?: string;
+  date_of_birth?: string;
+  place_of_birth?: string;
+  time_of_birth?: string;
+}) => 
+  api.put('/user/profile/extended', data);
+
+export const getProfileCompletion = () => 
+  api.get('/user/profile-completion');
+
+export const getHoroscope = () => 
+  api.get('/user/horoscope');
+
+// Community Stats
+export const getCommunityStats = (communityId: string) => 
+  api.get(`/communities/${communityId}/stats`);
+
 export default api;

@@ -102,6 +102,39 @@ class DirectMessageCreate(BaseModel):
     content: str
     message_type: str = "text"
 
+# New Models for Updates
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    photo: Optional[str] = None
+    language: Optional[str] = None
+    kuldevi: Optional[str] = None
+    kuldevi_temple_area: Optional[str] = None
+    gotra: Optional[str] = None
+    date_of_birth: Optional[str] = None  # YYYY-MM-DD
+    place_of_birth: Optional[str] = None
+    time_of_birth: Optional[str] = None  # HH:MM
+
+class TempleCreate(BaseModel):
+    name: str
+    location: Dict[str, str]  # {area, city, state, country}
+    description: Optional[str] = None
+    deity: Optional[str] = None
+    aarti_timings: Optional[Dict[str, str]] = None
+
+class TemplePost(BaseModel):
+    title: str
+    content: str
+    post_type: str = "announcement"  # announcement, event, donation, aarti
+
+class EventCreate(BaseModel):
+    name: str
+    description: str
+    event_type: str  # bhajan, garba, satsang, katha, workshop, annadan
+    location: Dict[str, Any]
+    date: str  # YYYY-MM-DD
+    time: str  # HH:MM
+    organizer_name: Optional[str] = None
+
 # Response Models
 class UserResponse(BaseModel):
     id: str
@@ -156,6 +189,40 @@ def generate_community_code(name: str):
     """Generate community code"""
     clean_name = ''.join(c for c in name.upper() if c.isalnum())[:8]
     return f"{clean_name}108"
+
+def generate_temple_id():
+    """Generate unique Temple ID"""
+    return f"TPL-{random.randint(1000, 9999)}"
+
+# Daily Wisdom Quotes
+WISDOM_QUOTES = [
+    {"quote": "You have the right to perform your duty, but not the fruits of action.", "source": "Bhagavad Gita 2.47"},
+    {"quote": "The soul is neither born, nor does it ever die. It is unborn, eternal, and primeval.", "source": "Bhagavad Gita 2.20"},
+    {"quote": "Set thy heart upon thy work, but never on its reward.", "source": "Bhagavad Gita"},
+    {"quote": "When meditation is mastered, the mind is unwavering like the flame of a candle in a windless place.", "source": "Bhagavad Gita 6.19"},
+    {"quote": "One who sees inaction in action, and action in inaction, is intelligent among men.", "source": "Bhagavad Gita 4.18"},
+    {"quote": "The mind is restless and difficult to restrain, but it is subdued by practice.", "source": "Bhagavad Gita 6.35"},
+    {"quote": "Whatever happened, happened for the good. Whatever is happening, is happening for the good.", "source": "Bhagavad Gita"},
+    {"quote": "He who has no attachments can really love others, for his love is pure and divine.", "source": "Bhagavad Gita"},
+    {"quote": "A person can rise through the efforts of his own mind; he can also degrade himself.", "source": "Bhagavad Gita 6.5"},
+    {"quote": "The wise see knowledge and action as one; they see truly.", "source": "Bhagavad Gita 5.4"},
+    {"quote": "Perform your obligatory duty, because action is indeed better than inaction.", "source": "Bhagavad Gita 3.8"},
+    {"quote": "Reshape yourself through the power of your will. Those who have conquered themselves live in peace.", "source": "Bhagavad Gita"},
+]
+
+# Hindu Calendar Tithis
+TITHIS = [
+    "Pratipada", "Dwitiya", "Tritiya", "Chaturthi", "Panchami", 
+    "Shashthi", "Saptami", "Ashtami", "Navami", "Dashami",
+    "Ekadashi", "Dwadashi", "Trayodashi", "Chaturdashi", "Purnima/Amavasya"
+]
+
+# Common Vrats
+VRATS = [
+    "Ekadashi Vrat", "Pradosh Vrat", "Satyanarayan Vrat", "Somvar Vrat",
+    "Mangalvar Vrat", "Guruvar Vrat", "Shanivar Vrat", "Shukravar Vrat",
+    "Purnima Vrat", "Amavasya Vrat", "Nirjala Ekadashi", "Karwa Chauth"
+]
 
 def create_jwt_token(user_id: str, sl_id: str):
     """Create JWT token"""
@@ -1108,6 +1175,447 @@ async def discover_communities(token_data: dict = Depends(verify_token)):
         "code": c["code"],
         "member_count": len(c.get("members", []))
     } for c in communities]
+
+# ================= WISDOM & PANCHANG ENDPOINTS =================
+
+@api_router.get("/wisdom/today")
+async def get_todays_wisdom():
+    """Get today's wisdom quote"""
+    # Use day of year to cycle through quotes
+    day_of_year = datetime.utcnow().timetuple().tm_yday
+    quote_index = day_of_year % len(WISDOM_QUOTES)
+    return WISDOM_QUOTES[quote_index]
+
+@api_router.get("/panchang/today")
+async def get_todays_panchang():
+    """Get today's Panchang (Hindu calendar info)"""
+    now = datetime.utcnow()
+    
+    # Simple calculation for demo - in production use proper Hindu calendar API
+    day_of_month = now.day
+    tithi_index = (day_of_month - 1) % 15
+    
+    # Approximate sunrise/sunset for India
+    sunrise = "6:22 AM"
+    sunset = "6:41 PM"
+    
+    # Select a vrat based on day
+    vrat = None
+    if tithi_index == 10:  # Ekadashi
+        vrat = "Ekadashi Vrat"
+    elif now.weekday() == 0:  # Monday
+        vrat = "Somvar Vrat"
+    elif now.weekday() == 3:  # Thursday
+        vrat = "Guruvar Vrat"
+    elif now.weekday() == 5:  # Saturday
+        vrat = "Shanivar Vrat"
+    
+    return {
+        "date": now.strftime("%Y-%m-%d"),
+        "tithi": TITHIS[tithi_index],
+        "paksha": "Shukla Paksha" if day_of_month <= 15 else "Krishna Paksha",
+        "sunrise": sunrise,
+        "sunset": sunset,
+        "vrat": vrat,
+        "nakshatra": "Rohini",  # Simplified
+        "yoga": "Siddhi",  # Simplified
+    }
+
+# ================= TEMPLE ENDPOINTS =================
+
+@api_router.post("/temples")
+async def create_temple(temple_data: TempleCreate, token_data: dict = Depends(verify_token)):
+    """Create a new temple (admin feature)"""
+    user = await db.users.find_one({"_id": ObjectId(token_data["user_id"])})
+    
+    # Generate unique temple ID
+    temple_id = generate_temple_id()
+    while await db.temples.find_one({"temple_id": temple_id}):
+        temple_id = generate_temple_id()
+    
+    temple = {
+        "temple_id": temple_id,
+        "name": temple_data.name,
+        "location": temple_data.location,
+        "description": temple_data.description,
+        "deity": temple_data.deity,
+        "aarti_timings": temple_data.aarti_timings or {},
+        "admin_id": token_data["user_id"],
+        "admins": [token_data["user_id"]],
+        "followers": [],
+        "follower_count": 0,
+        "posts": [],
+        "created_at": datetime.utcnow()
+    }
+    
+    result = await db.temples.insert_one(temple)
+    temple["_id"] = result.inserted_id
+    
+    return serialize_doc(temple)
+
+@api_router.get("/temples")
+async def get_temples(token_data: dict = Depends(verify_token)):
+    """Get all temples"""
+    temples = await db.temples.find().sort("follower_count", -1).limit(50).to_list(50)
+    return [serialize_doc(t) for t in temples]
+
+@api_router.get("/temples/nearby")
+async def get_nearby_temples(lat: float = 19.0760, lng: float = 72.8777, token_data: dict = Depends(verify_token)):
+    """Get temples near user's location"""
+    # For demo, return all temples - in production use geo queries
+    temples = await db.temples.find().limit(20).to_list(20)
+    return [serialize_doc(t) for t in temples]
+
+@api_router.get("/temples/{temple_id}")
+async def get_temple(temple_id: str, token_data: dict = Depends(verify_token)):
+    """Get temple details"""
+    temple = await db.temples.find_one({"temple_id": temple_id})
+    if not temple:
+        temple = await db.temples.find_one({"_id": ObjectId(temple_id)})
+    if not temple:
+        raise HTTPException(status_code=404, detail="Temple not found")
+    
+    return serialize_doc(temple)
+
+@api_router.post("/temples/{temple_id}/follow")
+async def follow_temple(temple_id: str, token_data: dict = Depends(verify_token)):
+    """Follow a temple"""
+    user_id = token_data["user_id"]
+    
+    temple = await db.temples.find_one({"temple_id": temple_id})
+    if not temple:
+        temple = await db.temples.find_one({"_id": ObjectId(temple_id)})
+    if not temple:
+        raise HTTPException(status_code=404, detail="Temple not found")
+    
+    # Add user to followers
+    await db.temples.update_one(
+        {"_id": temple["_id"]},
+        {
+            "$addToSet": {"followers": user_id},
+            "$inc": {"follower_count": 1}
+        }
+    )
+    
+    # Add temple to user's followed temples
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$addToSet": {"temple_passbook.temples_followed": str(temple["_id"])}}
+    )
+    
+    return {"message": f"Now following {temple['name']}"}
+
+@api_router.post("/temples/{temple_id}/unfollow")
+async def unfollow_temple(temple_id: str, token_data: dict = Depends(verify_token)):
+    """Unfollow a temple"""
+    user_id = token_data["user_id"]
+    
+    temple = await db.temples.find_one({"temple_id": temple_id})
+    if not temple:
+        temple = await db.temples.find_one({"_id": ObjectId(temple_id)})
+    if not temple:
+        raise HTTPException(status_code=404, detail="Temple not found")
+    
+    await db.temples.update_one(
+        {"_id": temple["_id"]},
+        {
+            "$pull": {"followers": user_id},
+            "$inc": {"follower_count": -1}
+        }
+    )
+    
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$pull": {"temple_passbook.temples_followed": str(temple["_id"])}}
+    )
+    
+    return {"message": f"Unfollowed {temple['name']}"}
+
+@api_router.post("/temples/{temple_id}/posts")
+async def create_temple_post(temple_id: str, post: TemplePost, token_data: dict = Depends(verify_token)):
+    """Create a temple post (admin only)"""
+    user_id = token_data["user_id"]
+    
+    temple = await db.temples.find_one({"temple_id": temple_id})
+    if not temple:
+        temple = await db.temples.find_one({"_id": ObjectId(temple_id)})
+    if not temple:
+        raise HTTPException(status_code=404, detail="Temple not found")
+    
+    if user_id not in temple.get("admins", []):
+        raise HTTPException(status_code=403, detail="Only temple admins can post")
+    
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    
+    new_post = {
+        "id": str(ObjectId()),
+        "title": post.title,
+        "content": post.content,
+        "post_type": post.post_type,
+        "author_id": user_id,
+        "author_name": user["name"],
+        "reactions": [],
+        "created_at": datetime.utcnow()
+    }
+    
+    await db.temples.update_one(
+        {"_id": temple["_id"]},
+        {"$push": {"posts": {"$each": [new_post], "$position": 0}}}
+    )
+    
+    return new_post
+
+@api_router.get("/temples/{temple_id}/posts")
+async def get_temple_posts(temple_id: str, token_data: dict = Depends(verify_token)):
+    """Get temple posts"""
+    temple = await db.temples.find_one({"temple_id": temple_id})
+    if not temple:
+        temple = await db.temples.find_one({"_id": ObjectId(temple_id)})
+    if not temple:
+        raise HTTPException(status_code=404, detail="Temple not found")
+    
+    return temple.get("posts", [])[:20]
+
+@api_router.post("/temples/{temple_id}/posts/{post_id}/react")
+async def react_to_temple_post(temple_id: str, post_id: str, data: dict, token_data: dict = Depends(verify_token)):
+    """React to a temple post"""
+    user_id = token_data["user_id"]
+    reaction = data.get("reaction", "namaste")  # namaste, om, jai
+    
+    # Update the post's reactions
+    await db.temples.update_one(
+        {"temple_id": temple_id, "posts.id": post_id},
+        {"$addToSet": {"posts.$.reactions": {"user_id": user_id, "reaction": reaction}}}
+    )
+    
+    return {"message": "Reaction added"}
+
+# ================= EVENTS ENDPOINTS =================
+
+@api_router.post("/events")
+async def create_event(event_data: EventCreate, token_data: dict = Depends(verify_token)):
+    """Create a new event"""
+    user = await db.users.find_one({"_id": ObjectId(token_data["user_id"])})
+    
+    # Check if user is verified
+    if not user.get("is_verified", False):
+        raise HTTPException(status_code=403, detail="Only verified members can create events")
+    
+    event = {
+        "name": event_data.name,
+        "description": event_data.description,
+        "event_type": event_data.event_type,
+        "location": event_data.location,
+        "date": event_data.date,
+        "time": event_data.time,
+        "organizer_id": token_data["user_id"],
+        "organizer_name": event_data.organizer_name or user["name"],
+        "attendees": [token_data["user_id"]],
+        "attendee_count": 1,
+        "created_at": datetime.utcnow()
+    }
+    
+    result = await db.events.insert_one(event)
+    event["_id"] = result.inserted_id
+    
+    return serialize_doc(event)
+
+@api_router.get("/events")
+async def get_events(token_data: dict = Depends(verify_token)):
+    """Get upcoming events"""
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    events = await db.events.find({"date": {"$gte": today}}).sort("date", 1).limit(20).to_list(20)
+    return [serialize_doc(e) for e in events]
+
+@api_router.get("/events/nearby")
+async def get_nearby_events(token_data: dict = Depends(verify_token)):
+    """Get events near user's location"""
+    user = await db.users.find_one({"_id": ObjectId(token_data["user_id"])})
+    user_location = user.get("location", {})
+    
+    # Get events in user's city
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    query = {"date": {"$gte": today}}
+    
+    if user_location.get("city"):
+        query["location.city"] = user_location["city"]
+    
+    events = await db.events.find(query).sort("date", 1).limit(20).to_list(20)
+    
+    # Add distance info (simplified)
+    result = []
+    for e in events:
+        event = serialize_doc(e)
+        event["distance"] = "2.5 km"  # Placeholder - calculate actual distance in production
+        result.append(event)
+    
+    return result
+
+@api_router.post("/events/{event_id}/attend")
+async def attend_event(event_id: str, token_data: dict = Depends(verify_token)):
+    """Mark attendance for an event"""
+    user_id = token_data["user_id"]
+    
+    await db.events.update_one(
+        {"_id": ObjectId(event_id)},
+        {
+            "$addToSet": {"attendees": user_id},
+            "$inc": {"attendee_count": 1}
+        }
+    )
+    
+    return {"message": "You're attending this event"}
+
+# ================= VERIFICATION ENDPOINTS =================
+
+@api_router.get("/user/verification-status")
+async def get_verification_status(token_data: dict = Depends(verify_token)):
+    """Get user's verification status"""
+    user = await db.users.find_one({"_id": ObjectId(token_data["user_id"])})
+    
+    return {
+        "is_verified": user.get("is_verified", False),
+        "verification_date": user.get("verification_date"),
+        "member_type": "Verified Member" if user.get("is_verified") else "Basic Member",
+        "can_post_in_community": user.get("is_verified", False)
+    }
+
+@api_router.post("/user/request-verification")
+async def request_verification(data: dict, token_data: dict = Depends(verify_token)):
+    """Request account verification (KYC)"""
+    user_id = token_data["user_id"]
+    
+    # Store verification request
+    verification = {
+        "user_id": user_id,
+        "full_name": data.get("full_name"),
+        "id_type": data.get("id_type"),  # aadhaar, pan, voter_id
+        "id_number": data.get("id_number"),
+        "status": "pending",
+        "created_at": datetime.utcnow()
+    }
+    
+    await db.verifications.update_one(
+        {"user_id": user_id},
+        {"$set": verification},
+        upsert=True
+    )
+    
+    # For demo, auto-approve
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {
+            "$set": {
+                "is_verified": True,
+                "verification_date": datetime.utcnow()
+            },
+            "$addToSet": {"badges": "Verified Member"}
+        }
+    )
+    
+    return {"message": "Verification completed successfully", "status": "approved"}
+
+# ================= PROFILE UPDATE ENDPOINTS =================
+
+@api_router.put("/user/profile/extended")
+async def update_extended_profile(update: ProfileUpdate, token_data: dict = Depends(verify_token)):
+    """Update extended profile fields"""
+    update_data = {k: v for k, v in update.dict().items() if v is not None}
+    
+    if update_data:
+        await db.users.update_one(
+            {"_id": ObjectId(token_data["user_id"])},
+            {"$set": update_data}
+        )
+    
+    user = await db.users.find_one({"_id": ObjectId(token_data["user_id"])})
+    return serialize_doc(user)
+
+@api_router.get("/user/profile-completion")
+async def get_profile_completion(token_data: dict = Depends(verify_token)):
+    """Get profile completion percentage"""
+    user = await db.users.find_one({"_id": ObjectId(token_data["user_id"])})
+    
+    fields = ["name", "photo", "language", "location", "kuldevi", "kuldevi_temple_area", 
+              "gotra", "date_of_birth", "place_of_birth", "time_of_birth"]
+    
+    completed = sum(1 for f in fields if user.get(f))
+    percentage = int((completed / len(fields)) * 100)
+    
+    # Check if birth details are complete for horoscope
+    birth_fields = ["date_of_birth", "place_of_birth", "time_of_birth"]
+    birth_complete = all(user.get(f) for f in birth_fields)
+    
+    return {
+        "completion_percentage": percentage,
+        "completed_fields": completed,
+        "total_fields": len(fields),
+        "horoscope_eligible": birth_complete,
+        "missing_fields": [f for f in fields if not user.get(f)]
+    }
+
+@api_router.get("/user/horoscope")
+async def get_horoscope(token_data: dict = Depends(verify_token)):
+    """Get user's horoscope (if birth details are complete)"""
+    user = await db.users.find_one({"_id": ObjectId(token_data["user_id"])})
+    
+    # Check if birth details are complete
+    birth_fields = ["date_of_birth", "place_of_birth", "time_of_birth"]
+    if not all(user.get(f) for f in birth_fields):
+        raise HTTPException(status_code=400, detail="Complete birth details to view horoscope")
+    
+    # Generate simple horoscope based on DOB
+    dob = user.get("date_of_birth", "2000-01-01")
+    month = int(dob.split("-")[1]) if dob else 1
+    
+    # Simple zodiac mapping
+    zodiac_signs = [
+        "Capricorn", "Aquarius", "Pisces", "Aries", "Taurus", "Gemini",
+        "Cancer", "Leo", "Virgo", "Libra", "Scorpio", "Sagittarius"
+    ]
+    zodiac = zodiac_signs[(month - 1) % 12]
+    
+    daily_insights = [
+        "Today is favorable for spiritual activities and prayers.",
+        "Financial matters will improve. Focus on savings.",
+        "Health needs attention. Practice yoga and meditation.",
+        "Relationships will strengthen. Spend time with family.",
+        "Career growth is indicated. Take on new responsibilities.",
+        "Travel may bring new opportunities. Stay positive."
+    ]
+    
+    day_of_year = datetime.utcnow().timetuple().tm_yday
+    
+    return {
+        "zodiac_sign": zodiac,
+        "rashi": zodiac,  # Simplified - should be calculated from actual kundli
+        "daily_horoscope": daily_insights[day_of_year % len(daily_insights)],
+        "lucky_color": ["Orange", "White", "Yellow", "Red", "Green"][day_of_year % 5],
+        "lucky_number": (day_of_year % 9) + 1,
+        "auspicious_time": "10:30 AM - 12:00 PM"
+    }
+
+# ================= COMMUNITY STATS ENDPOINTS =================
+
+@api_router.get("/communities/{community_id}/stats")
+async def get_community_stats(community_id: str, token_data: dict = Depends(verify_token)):
+    """Get community activity stats for home screen"""
+    # Count messages in last 24 hours
+    yesterday = datetime.utcnow() - timedelta(hours=24)
+    
+    message_count = await db.messages.count_documents({
+        "community_id": community_id,
+        "created_at": {"$gte": yesterday}
+    })
+    
+    community = await db.communities.find_one({"_id": ObjectId(community_id)})
+    
+    return {
+        "community_id": community_id,
+        "name": community["name"] if community else "Unknown",
+        "new_messages": message_count,
+        "member_count": len(community.get("members", [])) if community else 0
+    }
 
 # ================= SOCKET.IO EVENTS =================
 

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Keyboard
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getCommunityMessages, sendCommunityMessage, getCircleMessages, sendCircleMessage } from '../../../src/services/api';
+import { getCommunityMessages, sendCommunityMessage, getCircleMessages, sendCircleMessage, getVerificationStatus } from '../../../src/services/api';
 import { socketService } from '../../../src/services/socket';
 import { useAuthStore } from '../../../src/store/authStore';
 import { Message } from '../../../src/types';
@@ -25,14 +25,19 @@ export default function ChatScreen() {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
 
   const fetchMessages = useCallback(async () => {
     try {
       let response;
       if (type === 'community') {
         response = await getCommunityMessages(id!, subgroup);
+        // Check verification status for community chats
+        const verificationRes = await getVerificationStatus();
+        setIsVerified(verificationRes.data.is_verified);
       } else {
         response = await getCircleMessages(id!);
+        setIsVerified(true); // Circles don't require verification
       }
       setMessages(response.data);
     } catch (error) {
@@ -64,6 +69,12 @@ export default function ChatScreen() {
 
   const handleSend = async () => {
     if (!newMessage.trim()) return;
+    
+    // Check verification for community posts
+    if (type === 'community' && !isVerified) {
+      router.push('/verification');
+      return;
+    }
 
     setSending(true);
     try {
@@ -155,28 +166,41 @@ export default function ChatScreen() {
         />
 
         {/* Input */}
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.input}
-            placeholder="Type a message..."
-            value={newMessage}
-            onChangeText={setNewMessage}
-            multiline
-            maxLength={1000}
-            placeholderTextColor={COLORS.textLight}
-          />
-          <TouchableOpacity
-            style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}
-            onPress={handleSend}
-            disabled={!newMessage.trim() || sending}
+        {type === 'community' && !isVerified ? (
+          <TouchableOpacity 
+            style={styles.verificationBanner}
+            onPress={() => router.push('/verification')}
           >
-            {sending ? (
-              <ActivityIndicator size="small" color={COLORS.textWhite} />
-            ) : (
-              <Ionicons name="send" size={20} color={COLORS.textWhite} />
-            )}
+            <Ionicons name="shield-checkmark" size={20} color={COLORS.warning} />
+            <Text style={styles.verificationText}>
+              Verify your account to post in community discussions
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color={COLORS.warning} />
           </TouchableOpacity>
-        </View>
+        ) : (
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.input}
+              placeholder="Type a message..."
+              value={newMessage}
+              onChangeText={setNewMessage}
+              multiline
+              maxLength={1000}
+              placeholderTextColor={COLORS.textLight}
+            />
+            <TouchableOpacity
+              style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}
+              onPress={handleSend}
+              disabled={!newMessage.trim() || sending}
+            >
+              {sending ? (
+                <ActivityIndicator size="small" color={COLORS.textWhite} />
+              ) : (
+                <Ionicons name="send" size={20} color={COLORS.textWhite} />
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -309,5 +333,19 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     opacity: 0.5,
+  },
+  verificationBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.warning}15`,
+    padding: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: `${COLORS.warning}30`,
+  },
+  verificationText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.warning,
+    marginHorizontal: SPACING.sm,
   },
 });

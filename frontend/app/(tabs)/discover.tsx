@@ -1,33 +1,50 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator, TextInput } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { discoverCommunities, joinCommunityByCode } from '../../src/services/api';
+import { discoverCommunities, getTemples, getNearbyEvents } from '../../src/services/api';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 
-interface DiscoverCommunity {
+interface Temple {
+  id: string;
+  temple_id: string;
+  name: string;
+  location: { area?: string; city?: string };
+  deity?: string;
+  follower_count: number;
+}
+
+interface Event {
   id: string;
   name: string;
-  type: string;
-  code: string;
-  member_count: number;
+  event_type: string;
+  date: string;
+  time: string;
+  location: { area?: string; city?: string };
+  distance?: string;
 }
 
 export default function DiscoverScreen() {
   const router = useRouter();
-  const [communities, setCommunities] = useState<DiscoverCommunity[]>([]);
+  const [activeTab, setActiveTab] = useState<'communities' | 'temples' | 'events'>('communities');
+  const [communities, setCommunities] = useState([]);
+  const [temples, setTemples] = useState<Temple[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [joinCode, setJoinCode] = useState('');
-  const [joining, setJoining] = useState(false);
-  const [message, setMessage] = useState({ type: '', text: '' });
 
-  const fetchCommunities = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const response = await discoverCommunities();
-      setCommunities(response.data);
+      const [commRes, templeRes, eventRes] = await Promise.all([
+        discoverCommunities(),
+        getTemples().catch(() => ({ data: [] })),
+        getNearbyEvents().catch(() => ({ data: [] })),
+      ]);
+      setCommunities(commRes.data);
+      setTemples(templeRes.data);
+      setEvents(eventRes.data);
     } catch (error) {
-      console.error('Error fetching communities:', error);
+      console.error('Error fetching discover data:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -35,61 +52,25 @@ export default function DiscoverScreen() {
   }, []);
 
   useEffect(() => {
-    fetchCommunities();
-  }, [fetchCommunities]);
+    fetchData();
+  }, [fetchData]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchCommunities();
+    fetchData();
   };
 
-  const handleJoinByCode = async () => {
-    if (!joinCode.trim()) return;
-
-    setJoining(true);
-    setMessage({ type: '', text: '' });
-
-    try {
-      const response = await joinCommunityByCode(joinCode.trim());
-      setMessage({ type: 'success', text: `Joined ${response.data.community}!` });
-      setJoinCode('');
-      fetchCommunities();
-    } catch (error: any) {
-      setMessage({ type: 'error', text: error.response?.data?.detail || 'Failed to join community' });
-    } finally {
-      setJoining(false);
-    }
-  };
-
-  const getCommunityIcon = (type: string) => {
+  const getEventIcon = (type: string) => {
     switch (type) {
-      case 'area': return 'home';
-      case 'city': return 'business';
-      case 'state': return 'map';
-      case 'country': return 'flag';
-      default: return 'people';
+      case 'bhajan': return 'musical-notes';
+      case 'garba': return 'people';
+      case 'satsang': return 'book';
+      case 'katha': return 'mic';
+      case 'workshop': return 'school';
+      case 'annadan': return 'restaurant';
+      default: return 'calendar';
     }
   };
-
-  const renderCommunity = ({ item }: { item: DiscoverCommunity }) => (
-    <TouchableOpacity
-      style={styles.communityCard}
-      onPress={() => router.push(`/community/${item.id}`)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.iconContainer}>
-        <Ionicons name={getCommunityIcon(item.type)} size={24} color={COLORS.primary} />
-      </View>
-      <View style={styles.communityInfo}>
-        <Text style={styles.communityName}>{item.name}</Text>
-        <View style={styles.communityMeta}>
-          <Ionicons name="people" size={14} color={COLORS.textSecondary} />
-          <Text style={styles.memberText}>{item.member_count} members</Text>
-          <Text style={styles.codeText}>Code: {item.code}</Text>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
 
   if (loading) {
     return (
@@ -101,58 +82,155 @@ export default function DiscoverScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Join by Code Section */}
-      <View style={styles.joinSection}>
-        <Text style={styles.sectionTitle}>Join Community by Code</Text>
-        <View style={styles.joinRow}>
-          <TextInput
-            style={styles.codeInput}
-            placeholder="Enter community code"
-            value={joinCode}
-            onChangeText={setJoinCode}
-            autoCapitalize="characters"
-            placeholderTextColor={COLORS.textLight}
-          />
+      {/* Tab Switcher */}
+      <View style={styles.tabContainer}>
+        {['communities', 'temples', 'events'].map((tab) => (
           <TouchableOpacity
-            style={[styles.joinButton, !joinCode.trim() && styles.joinButtonDisabled]}
-            onPress={handleJoinByCode}
-            disabled={!joinCode.trim() || joining}
+            key={tab}
+            style={[styles.tab, activeTab === tab && styles.tabActive]}
+            onPress={() => setActiveTab(tab as any)}
           >
-            {joining ? (
-              <ActivityIndicator size="small" color={COLORS.textWhite} />
-            ) : (
-              <Ionicons name="enter" size={20} color={COLORS.textWhite} />
-            )}
+            <Ionicons
+              name={tab === 'communities' ? 'people' : tab === 'temples' ? 'home' : 'calendar'}
+              size={18}
+              color={activeTab === tab ? COLORS.primary : COLORS.textSecondary}
+            />
+            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </Text>
           </TouchableOpacity>
-        </View>
-        {message.text ? (
-          <Text style={[styles.message, message.type === 'error' ? styles.errorText : styles.successText]}>
-            {message.text}
-          </Text>
-        ) : null}
+        ))}
       </View>
 
-      {/* Popular Communities */}
-      <Text style={styles.sectionTitle}>Popular Communities</Text>
-      
-      {communities.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="compass-outline" size={64} color={COLORS.textLight} />
-          <Text style={styles.emptyTitle}>No Communities Found</Text>
-          <Text style={styles.emptyText}>Be the first to create a community in your area!</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={communities}
-          renderItem={renderCommunity}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />
-          }
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-        />
-      )}
+      <ScrollView
+        style={styles.scrollView}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />
+        }
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Communities Tab */}
+        {activeTab === 'communities' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Popular Communities</Text>
+            {communities.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="people-outline" size={48} color={COLORS.textLight} />
+                <Text style={styles.emptyText}>No communities found</Text>
+              </View>
+            ) : (
+              communities.map((community: any) => (
+                <TouchableOpacity
+                  key={community.id}
+                  style={styles.card}
+                  onPress={() => router.push(`/community/${community.id}`)}
+                >
+                  <View style={styles.cardIcon}>
+                    <Ionicons name="people" size={24} color={COLORS.primary} />
+                  </View>
+                  <View style={styles.cardInfo}>
+                    <Text style={styles.cardTitle}>{community.name}</Text>
+                    <Text style={styles.cardSubtitle}>{community.member_count} members</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        )}
+
+        {/* Temples Tab */}
+        {activeTab === 'temples' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Temple Network</Text>
+            <Text style={styles.sectionSubtitle}>Follow temples to receive updates and announcements</Text>
+            
+            {temples.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="home-outline" size={48} color={COLORS.textLight} />
+                <Text style={styles.emptyText}>No temples registered yet</Text>
+                <Text style={styles.emptySubtext}>Be the first to add your local temple</Text>
+              </View>
+            ) : (
+              temples.map((temple) => (
+                <TouchableOpacity
+                  key={temple.id}
+                  style={styles.card}
+                  onPress={() => router.push(`/temple/${temple.temple_id}`)}
+                >
+                  <View style={[styles.cardIcon, { backgroundColor: `${COLORS.warning}20` }]}>
+                    <Ionicons name="home" size={24} color={COLORS.warning} />
+                  </View>
+                  <View style={styles.cardInfo}>
+                    <Text style={styles.cardTitle}>{temple.name}</Text>
+                    <Text style={styles.cardSubtitle}>
+                      {temple.location?.city || temple.location?.area} • {temple.follower_count} followers
+                    </Text>
+                    {temple.deity && (
+                      <Text style={styles.deityText}>{temple.deity}</Text>
+                    )}
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        )}
+
+        {/* Events Tab */}
+        {activeTab === 'events' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Nearby Sanatan Events</Text>
+            <Text style={styles.sectionSubtitle}>Discover spiritual events happening near you</Text>
+            
+            {events.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="calendar-outline" size={48} color={COLORS.textLight} />
+                <Text style={styles.emptyText}>No upcoming events</Text>
+                <Text style={styles.emptySubtext}>Check back later for new events</Text>
+              </View>
+            ) : (
+              events.map((event) => (
+                <TouchableOpacity
+                  key={event.id}
+                  style={styles.eventCard}
+                  onPress={() => router.push(`/event/${event.id}`)}
+                >
+                  <View style={styles.eventHeader}>
+                    <View style={[styles.eventIcon, { backgroundColor: `${COLORS.success}20` }]}>
+                      <Ionicons name={getEventIcon(event.event_type)} size={20} color={COLORS.success} />
+                    </View>
+                    <View style={styles.eventInfo}>
+                      <Text style={styles.eventName}>{event.name}</Text>
+                      <Text style={styles.eventType}>
+                        {event.event_type.charAt(0).toUpperCase() + event.event_type.slice(1)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.eventDetails}>
+                    <View style={styles.eventDetail}>
+                      <Ionicons name="calendar" size={14} color={COLORS.textSecondary} />
+                      <Text style={styles.eventDetailText}>{event.date}</Text>
+                    </View>
+                    <View style={styles.eventDetail}>
+                      <Ionicons name="time" size={14} color={COLORS.textSecondary} />
+                      <Text style={styles.eventDetailText}>{event.time}</Text>
+                    </View>
+                    {event.distance && (
+                      <View style={styles.eventDetail}>
+                        <Ionicons name="location" size={14} color={COLORS.textSecondary} />
+                        <Text style={styles.eventDetailText}>{event.distance}</Text>
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        )}
+
+        <View style={styles.bottomPadding} />
+      </ScrollView>
     </View>
   );
 }
@@ -168,66 +246,61 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.background,
   },
-  joinSection: {
-    padding: SPACING.md,
+  tabContainer: {
+    flexDirection: 'row',
     backgroundColor: COLORS.surface,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.sm,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.divider,
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.sm,
-  },
-  joinRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-  codeInput: {
+  tab: {
     flex: 1,
-    backgroundColor: COLORS.background,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: BORDER_RADIUS.md,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    fontSize: 14,
-    color: COLORS.text,
-  },
-  joinButton: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
   },
-  joinButtonDisabled: {
-    opacity: 0.5,
+  tabActive: {
+    backgroundColor: `${COLORS.primary}15`,
   },
-  message: {
-    marginTop: SPACING.sm,
+  tabText: {
+    marginLeft: SPACING.xs,
     fontSize: 13,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
   },
-  errorText: {
-    color: COLORS.error,
+  tabTextActive: {
+    color: COLORS.primary,
+    fontWeight: '600',
   },
-  successText: {
-    color: COLORS.success,
+  scrollView: {
+    flex: 1,
   },
-  listContent: {
+  section: {
     padding: SPACING.md,
   },
-  communityCard: {
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: SPACING.xs,
+  },
+  sectionSubtitle: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.md,
+  },
+  card: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
     padding: SPACING.md,
     borderRadius: BORDER_RADIUS.lg,
+    marginBottom: SPACING.sm,
   },
-  iconContainer: {
+  cardIcon: {
     width: 48,
     height: 48,
     borderRadius: BORDER_RADIUS.md,
@@ -236,48 +309,88 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: SPACING.md,
   },
-  communityInfo: {
+  cardInfo: {
     flex: 1,
   },
-  communityName: {
-    fontSize: 16,
+  cardTitle: {
+    fontSize: 15,
     fontWeight: '600',
     color: COLORS.text,
-    marginBottom: SPACING.xs,
   },
-  communityMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  memberText: {
-    marginLeft: 4,
-    marginRight: SPACING.md,
-    fontSize: 12,
+  cardSubtitle: {
+    fontSize: 13,
     color: COLORS.textSecondary,
+    marginTop: 2,
   },
-  codeText: {
-    fontSize: 11,
-    color: COLORS.textLight,
+  deityText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    marginTop: 2,
   },
-  separator: {
-    height: SPACING.sm,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: SPACING.xl,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginTop: SPACING.lg,
+  eventCard: {
+    backgroundColor: COLORS.surface,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
     marginBottom: SPACING.sm,
   },
-  emptyText: {
-    fontSize: 14,
+  eventHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  eventIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.md,
+  },
+  eventInfo: {
+    flex: 1,
+  },
+  eventName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  eventType: {
+    fontSize: 12,
     color: COLORS.textSecondary,
-    textAlign: 'center',
+    marginTop: 2,
+  },
+  eventDetails: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingLeft: 52,
+  },
+  eventDetail: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: SPACING.md,
+    marginBottom: SPACING.xs,
+  },
+  eventDetailText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginLeft: 4,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: SPACING.xl * 2,
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: COLORS.textSecondary,
+    marginTop: SPACING.md,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: COLORS.textLight,
+    marginTop: SPACING.xs,
+  },
+  bottomPadding: {
+    height: SPACING.xl,
   },
 });
