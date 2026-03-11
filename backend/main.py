@@ -837,6 +837,8 @@ async def send_dm(message: DirectMessageCreate, token_data: dict = Depends(verif
         'sender_photo': sender.get('photo'),
         'text': message.content,
         'content': message.content,  # Keep for compatibility
+        'status': 'delivered',  # delivered = single tick, read = double tick
+        'read_by': [],  # List of user IDs who have read the message
     }
     
     msg_id = await db.add_message_to_chat(chat_id, msg_data)
@@ -849,6 +851,7 @@ async def send_dm(message: DirectMessageCreate, token_data: dict = Depends(verif
         'sender_photo': sender.get('photo'),
         'text': message.content,
         'content': message.content,
+        'status': 'delivered',
         'created_at': now.isoformat(),
         'timestamp': now.isoformat()
     }
@@ -935,6 +938,76 @@ async def get_dm_messages(chat_id: str, limit: int = 50, token_data: dict = Depe
     
     messages = await db.get_chat_messages(chat_id, limit)
     return messages
+
+
+@api_router.post("/dm/{chat_id}/read")
+async def mark_messages_read(chat_id: str, token_data: dict = Depends(verify_token)):
+    """Mark all messages in a chat as read by the current user"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    # Verify user is part of this chat
+    chat = await db.get_document('chats', chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    if user_id not in chat.get('members', []):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Check if user has read receipts enabled
+    user = await db.get_document('users', user_id)
+    if not user.get('privacy_settings', {}).get('read_receipts', True):
+        # User has disabled read receipts, don't update
+        return {"message": "Read receipts disabled"}
+    
+    # Get all messages and mark them as read
+    messages = await db.get_chat_messages(chat_id, 100)
+    updated_count = 0
+    
+    for msg in messages:
+        # Only mark messages from other users as read
+        if msg.get('sender_id') != user_id:
+            read_by = msg.get('read_by', [])
+            if user_id not in read_by:
+                read_by.append(user_id)
+                await db.update_chat_message(chat_id, msg['id'], {
+                    'read_by': read_by,
+                    'status': 'read'
+                })
+                updated_count += 1
+    
+    return {"message": f"Marked {updated_count} messages as read"}
+
+
+@api_router.get("/user/privacy-settings")
+async def get_privacy_settings(token_data: dict = Depends(verify_token)):
+    """Get user's privacy settings"""
+    db = await get_db()
+    user = await db.get_document('users', token_data["user_id"])
+    
+    # Default privacy settings
+    default_settings = {
+        'read_receipts': True,  # Show double tick when messages are read
+        'online_status': True,  # Show online/last seen status
+        'profile_photo': 'everyone',  # Who can see profile photo
+    }
+    
+    return user.get('privacy_settings', default_settings)
+
+
+@api_router.put("/user/privacy-settings")
+async def update_privacy_settings(settings: dict, token_data: dict = Depends(verify_token)):
+    """Update user's privacy settings"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    # Validate settings
+    allowed_keys = {'read_receipts', 'online_status', 'profile_photo'}
+    filtered_settings = {k: v for k, v in settings.items() if k in allowed_keys}
+    
+    await db.update_document('users', user_id, {'privacy_settings': filtered_settings})
+    
+    return {"message": "Privacy settings updated", "settings": filtered_settings}
 
 
 # =================== CIRCLES ===================

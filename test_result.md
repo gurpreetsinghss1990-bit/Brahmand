@@ -345,6 +345,30 @@ backend:
         agent: "testing"
         comment: "Firebase web config endpoint GET /api/firebase-config working perfectly. Returns complete config with apiKey, projectId (sanatan-lok), authDomain, storageBucket, messagingSenderId, appId, measurementId. Ready for frontend Firebase SDK initialization."
 
+  - task: "Message Status (Delivered/Read)"
+    implemented: true
+    working: true
+    file: "main.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "NEW FEATURE: Message status functionality fully working. DMs start with status 'delivered' and change to 'read' when marked via POST /api/dm/{chat_id}/read. Status field properly included in message responses. Read tracking working correctly with read_by array."
+
+  - task: "Privacy Settings (Read Receipts)"
+    implemented: true
+    working: true
+    file: "main.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "NEW FEATURE: Privacy settings fully functional. GET /api/user/privacy-settings returns default settings (read_receipts: true, online_status: true, profile_photo: 'everyone'). PUT /api/user/privacy-settings updates correctly. When read_receipts disabled, mark-as-read returns 'Read receipts disabled' and respects user privacy."
+
   - task: "Temples & Events APIs"
     implemented: true
     working: true
@@ -536,3 +560,5 @@ agent_communication:
     message: "✅ FCM PUSH NOTIFICATION COMPREHENSIVE TESTING: All 9/9 FCM test scenarios passed (100% success rate). Complete FCM flow verified: User authentication with mock OTP 123456, FCM token management (POST /api/user/fcm-token and GET /api/user/profile), and push notification integration via DMs. Two test users created (User 1: +915555555555 -> SL-931779, User 2: +916666666666 -> SL-974506) with mock FCM tokens ('test_fcm_token_123456789' and 'second_user_fcm_token'). FCM endpoints working: tokens saved successfully in Firestore, retrieved correctly in user profiles. Push notification integration confirmed: DM sends trigger FCM attempts with expected error 'The registration token is not a valid FCM registration token' for mock tokens. Chat creation (private_H6OWit0rK4ehYpxzT8U6_HBk97P1qDogVfuxNIEIi) and message persistence verified. FCM push notification system fully functional with proper error handling for invalid tokens."
   - agent: "testing"
     message: "🚀 BETA LAUNCH VERIFICATION COMPLETE: All 12/12 comprehensive tests passed (100% success rate). FLOW 1 - New User Signup & Auto-Community Assignment: ✅ Perfect (7/7 tests passed). Complete signup with OTP (+917777777777 -> SL-961768), reverse geocoding for Delhi coordinates (28.6139, 77.2090), dual location setup creating 4 communities (Bharat Group, New Delhi Group, Connaught Place Group, Delhi Group), and auto-join functionality verified. FLOW 2 - Private Chat: ✅ Perfect (3/3 tests passed). DM creation between users working with deterministic chat ID format (private_*), message persistence, and conversation retrieval. FLOW 3 - Community Chat: ✅ Perfect (2/2 tests passed). Community messaging to 'chat' subgroup working, message sending and retrieval functional. CRITICAL FIX APPLIED: Fixed community messaging endpoint serialization issue with Firestore timestamps. Backend v2.2.0 with Firestore ready for beta launch."
+  - agent: "testing"
+    message: "🎯 NEW FEATURES TESTING COMPLETE: All 10/10 tests passed (100% success rate). ✅ MESSAGE STATUS (DELIVERED/READ): Full implementation working - DMs start with status 'delivered', change to 'read' via POST /api/dm/{chat_id}/read. Status field properly included in responses. ✅ PRIVACY SETTINGS: Complete functionality - GET /api/user/privacy-settings returns defaults (read_receipts: true), PUT updates correctly, disabled read_receipts properly blocks read status updates. ✅ EXISTING FEATURES: Health check, communities, DM conversations all confirmed working. Comprehensive test suite verified users +917771111111 (SL-486700) and +917772222222 (SL-656717). Chat ID: private_K4BARESAjPZ58WUGipAV_VsMpBMLF9Akz4O5CNpHc. All new features production-ready."

@@ -171,6 +171,29 @@ export default function DirectMessageScreen() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  // Message status indicator component
+  const MessageStatus = ({ status, isOwn }: { status?: string; isOwn: boolean }) => {
+    if (!isOwn) return null;
+    
+    const color = isOwn ? 'rgba(255,255,255,0.7)' : COLORS.textLight;
+    
+    if (status === 'read') {
+      // Double tick (read)
+      return (
+        <View style={styles.statusContainer}>
+          <Ionicons name="checkmark-done" size={14} color={color} />
+        </View>
+      );
+    }
+    
+    // Single tick (delivered)
+    return (
+      <View style={styles.statusContainer}>
+        <Ionicons name="checkmark" size={14} color={color} />
+      </View>
+    );
+  };
+
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const isOwnMessage = item.sender_id === user?.id;
     return (
@@ -182,9 +205,12 @@ export default function DirectMessageScreen() {
           <Text style={[styles.messageText, isOwnMessage && styles.ownMessageText]}>
             {item.text || item.content}
           </Text>
-          <Text style={[styles.timeText, isOwnMessage && styles.ownTimeText]}>
-            {formatTime(item.created_at)}
-          </Text>
+          <View style={styles.messageFooter}>
+            <Text style={[styles.timeText, isOwnMessage && styles.ownTimeText]}>
+              {formatTime(item.created_at)}
+            </Text>
+            <MessageStatus status={(item as any).status} isOwn={isOwnMessage} />
+          </View>
         </View>
       </View>
     );
@@ -391,11 +417,19 @@ const styles = StyleSheet.create({
   timeText: {
     fontSize: 10,
     color: COLORS.textLight,
-    marginTop: 4,
-    alignSelf: 'flex-end',
   },
   ownTimeText: {
     color: 'rgba(255,255,255,0.7)',
+  },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    gap: 4,
+  },
+  statusContainer: {
+    marginLeft: 2,
   },
   emptyContainer: {
     flex: 1,

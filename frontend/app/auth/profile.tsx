@@ -59,7 +59,8 @@ export default function ProfileSetupScreen() {
       });
 
       await login(response.data.user, response.data.token);
-      router.replace('/auth/location');
+      // Navigate to new address entry flow
+      router.replace('/auth/address-entry');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Registration failed. Please try again.');
     } finally {

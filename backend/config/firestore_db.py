@@ -256,3 +256,10 @@ class FirestoreDB:
             return list(reversed(messages))  # Chronological order
         
         return await self._run_sync(_get)
+    
+    async def update_chat_message(self, chat_id: str, message_id: str, update_data: Dict[str, Any]) -> None:
+        """Update a specific message in a chat"""
+        def _update():
+            self.client.collection('chats').document(chat_id).collection('messages').document(message_id).update(update_data)
+        
+        await self._run_sync(_update)
