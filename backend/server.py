@@ -441,7 +441,7 @@ async def setup_location(location: LocationSetup, token_data: dict = Depends(ver
     
     # Area Community
     area_community = await get_or_create_community(
-        f"{location.area} Sanatan Lok",
+        f"{location.area.title()} Area Group",
         "area",
         location_data
     )
@@ -449,7 +449,7 @@ async def setup_location(location: LocationSetup, token_data: dict = Depends(ver
     
     # City Community
     city_community = await get_or_create_community(
-        f"{location.city} Sanatan Lok",
+        f"{location.city.title()} City Group",
         "city",
         {"country": location.country, "state": location.state, "city": location.city}
     )
@@ -457,7 +457,7 @@ async def setup_location(location: LocationSetup, token_data: dict = Depends(ver
     
     # State Community
     state_community = await get_or_create_community(
-        f"{location.state} Sanatan Lok",
+        f"{location.state.title()} State Group",
         "state",
         {"country": location.country, "state": location.state}
     )
@@ -465,7 +465,7 @@ async def setup_location(location: LocationSetup, token_data: dict = Depends(ver
     
     # Country Community
     country_community = await get_or_create_community(
-        f"{location.country} Sanatan Lok",
+        f"{location.country.title()} Country Group",
         "country",
         {"country": location.country}
     )
@@ -506,7 +506,7 @@ async def setup_dual_location(locations: DualLocationSetup, token_data: dict = D
         
         # Area Community
         area_community = await get_or_create_community(
-            f"{loc_data['area']} Sanatan Lok",
+            f"{loc_data['area'].title()} Area Group",
             "area",
             loc_data
         )
@@ -514,7 +514,7 @@ async def setup_dual_location(locations: DualLocationSetup, token_data: dict = D
         
         # City Community
         city_community = await get_or_create_community(
-            f"{loc_data['city']} Sanatan Lok",
+            f"{loc_data['city'].title()} City Group",
             "city",
             {"country": loc_data['country'], "state": loc_data['state'], "city": loc_data['city']}
         )
@@ -522,7 +522,7 @@ async def setup_dual_location(locations: DualLocationSetup, token_data: dict = D
         
         # State Community
         state_community = await get_or_create_community(
-            f"{loc_data['state']} Sanatan Lok",
+            f"{loc_data['state'].title()} State Group",
             "state",
             {"country": loc_data['country'], "state": loc_data['state']}
         )
@@ -530,7 +530,7 @@ async def setup_dual_location(locations: DualLocationSetup, token_data: dict = D
         
         # Country Community
         country_community = await get_or_create_community(
-            f"{loc_data['country']} Sanatan Lok",
+            f"{loc_data['country'].title()} Country Group",
             "country",
             {"country": loc_data['country']}
         )
