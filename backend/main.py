@@ -555,104 +555,136 @@ async def setup_location(location: LocationSetup, token_data: dict = Depends(ver
 
 @api_router.post("/user/dual-location")
 async def setup_dual_location(locations: DualLocationSetup, token_data: dict = Depends(verify_token)):
-    """Setup home and optionally office location, join communities for both"""
+    """
+    Setup home and optionally office location, join 5 default communities:
+    1. Home Area Group
+    2. Office Area Group (if provided)
+    3. City Group
+    4. State Group
+    5. Country Group (Bharat)
+    """
     db = await get_db()
     user_id = token_data["user_id"]
     update_data = {}
-    all_community_ids = []
+    default_community_ids = []  # Track the 5 default communities (cannot leave)
     
-    async def create_communities_for_location(loc):
-        """Helper to create/get communities for a location"""
-        community_ids = []
+    # Community type labels for UI display
+    TYPE_LABELS = {
+        'home_area': 'Home Area',
+        'office_area': 'Office Area',
+        'city': 'City Community',
+        'state': 'State Community',
+        'country': 'National Community'
+    }
+    
+    # Community type order for sorting
+    TYPE_ORDER = {
+        'home_area': 1,
+        'office_area': 2,
+        'city': 3,
+        'state': 4,
+        'country': 5
+    }
+    
+    async def create_or_get_community(name: str, comm_type: str, location: dict):
+        """Helper to create/get a community with proper label"""
+        existing = await db.get_community_by_name(name)
+        if existing:
+            # Update existing community with label and is_default if not set
+            if not existing.get('label') or not existing.get('is_default'):
+                await db.update_document('communities', existing['id'], {
+                    'label': TYPE_LABELS.get(comm_type, ''),
+                    'is_default': True,
+                    'sort_order': TYPE_ORDER.get(comm_type, 99)
+                })
+            return existing['id']
         
-        # Area Group
-        area_name = f"{loc['area'].title()} Group"
-        area = await db.get_community_by_name(area_name)
-        if not area:
-            area_id = await db.create_community({
-                "name": area_name, "type": "area", "location": loc,
-                "code": generate_community_code(loc['area']), "members": [], "subgroups": SUBGROUPS
-            })
-            logger.info(f"Created community: {area_name}")
-        else:
-            area_id = area['id']
-        community_ids.append(area_id)
-        
-        # City Group
-        city_name = f"{loc['city'].title()} Group"
-        city = await db.get_community_by_name(city_name)
-        if not city:
-            city_id = await db.create_community({
-                "name": city_name, "type": "city",
-                "location": {"country": loc['country'], "state": loc['state'], "city": loc['city']},
-                "code": generate_community_code(loc['city']), "members": [], "subgroups": SUBGROUPS
-            })
-            logger.info(f"Created community: {city_name}")
-        else:
-            city_id = city['id']
-        community_ids.append(city_id)
-        
-        # State Group
-        state_name = f"{loc['state'].title()} Group"
-        state = await db.get_community_by_name(state_name)
-        if not state:
-            state_id = await db.create_community({
-                "name": state_name, "type": "state",
-                "location": {"country": loc['country'], "state": loc['state']},
-                "code": generate_community_code(loc['state']), "members": [], "subgroups": SUBGROUPS
-            })
-            logger.info(f"Created community: {state_name}")
-        else:
-            state_id = state['id']
-        community_ids.append(state_id)
-        
-        # Country Group
-        country_name = f"{loc['country'].title()} Group"
-        country = await db.get_community_by_name(country_name)
-        if not country:
-            country_id = await db.create_community({
-                "name": country_name, "type": "country",
-                "location": {"country": loc['country']},
-                "code": generate_community_code(loc['country']), "members": [], "subgroups": SUBGROUPS
-            })
-            logger.info(f"Created community: {country_name}")
-        else:
-            country_id = country['id']
-        community_ids.append(country_id)
-        
-        return community_ids
+        # Create new community
+        comm_id = await db.create_community({
+            "name": name,
+            "type": comm_type,
+            "label": TYPE_LABELS.get(comm_type, ''),
+            "location": location,
+            "code": generate_community_code(name.split()[0]),
+            "members": [],
+            "is_default": True,
+            "sort_order": TYPE_ORDER.get(comm_type, 99),
+            "subgroups": SUBGROUPS
+        })
+        logger.info(f"Created default community: {name} ({comm_type})")
+        return comm_id
     
     # Process home location
     if locations.home_location:
         home_loc = locations.home_location
         update_data['home_location'] = home_loc
         update_data['location'] = home_loc
-        home_communities = await create_communities_for_location(home_loc)
-        all_community_ids.extend(home_communities)
+        
+        # 1. Home Area Group
+        area_name = f"{home_loc['area'].title()} Group"
+        area_id = await create_or_get_community(area_name, 'home_area', home_loc)
+        default_community_ids.append(area_id)
+        
+        # 3. City Group
+        city_name = f"{home_loc['city'].title()} Group"
+        city_id = await create_or_get_community(city_name, 'city', {
+            "country": home_loc['country'], "state": home_loc['state'], "city": home_loc['city']
+        })
+        default_community_ids.append(city_id)
+        
+        # 4. State Group
+        state_name = f"{home_loc['state'].title()} Group"
+        state_id = await create_or_get_community(state_name, 'state', {
+            "country": home_loc['country'], "state": home_loc['state']
+        })
+        default_community_ids.append(state_id)
+        
+        # 5. Country Group
+        country = home_loc['country'].replace('India', 'Bharat')
+        country_name = f"{country.title()} Group"
+        country_id = await create_or_get_community(country_name, 'country', {
+            "country": country
+        })
+        default_community_ids.append(country_id)
     
-    # Process office location
+    # 2. Process office location (Office Area Group)
     if locations.office_location:
         office_loc = locations.office_location
         update_data['office_location'] = office_loc
-        office_communities = await create_communities_for_location(office_loc)
-        all_community_ids.extend(office_communities)
+        
+        # Office Area Group
+        office_area_name = f"{office_loc['area'].title()} Group"
+        # Check if it's different from home area
+        home_area_name = f"{locations.home_location['area'].title()} Group" if locations.home_location else ""
+        
+        if office_area_name != home_area_name:
+            office_area_id = await create_or_get_community(office_area_name, 'office_area', office_loc)
+            # Insert office area after home area (index 1)
+            if len(default_community_ids) >= 1:
+                default_community_ids.insert(1, office_area_id)
+            else:
+                default_community_ids.append(office_area_id)
     
-    # Remove duplicates
-    all_community_ids = list(set(all_community_ids))
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_community_ids = []
+    for cid in default_community_ids:
+        if cid not in seen:
+            seen.add(cid)
+            unique_community_ids.append(cid)
     
     # Add user to all communities
-    for cid in all_community_ids:
+    for cid in unique_community_ids:
         await db.add_member_to_community(cid, user_id)
     
-    # Update user with locations and communities
-    if update_data:
-        await db.update_document('users', user_id, update_data)
+    # Update user with locations and default communities
+    update_data['default_communities'] = unique_community_ids  # Store IDs of default communities (cannot leave)
+    update_data['communities'] = unique_community_ids
     
-    if all_community_ids:
-        await db.array_union_update('users', user_id, 'communities', all_community_ids)
+    await db.update_document('users', user_id, update_data)
     
     user = await db.get_document('users', user_id)
-    return {"message": "Locations updated", "user": user, "communities_joined": len(all_community_ids)}
+    return {"message": "Locations updated", "user": user, "communities_joined": len(unique_community_ids)}
 
 
 @api_router.get("/user/search/{sl_id}")
@@ -807,26 +839,65 @@ async def reverse_geocode(request: dict):
 
 @api_router.get("/communities")
 async def get_communities(token_data: dict = Depends(verify_token)):
+    """
+    Get user's communities sorted in the correct order:
+    1. Home Area
+    2. Office Area
+    3. City
+    4. State
+    5. Country
+    Then any additional joined communities
+    """
     db = await get_db()
     user = await db.get_document('users', token_data["user_id"])
     if not user:
         return []
     
+    # Type order for sorting
+    TYPE_ORDER = {
+        'home_area': 1,
+        'office_area': 2,
+        'area': 2,  # Legacy area type
+        'city': 3,
+        'state': 4,
+        'country': 5
+    }
+    
+    # Type labels for display
+    TYPE_LABELS = {
+        'home_area': 'Home Area',
+        'office_area': 'Office Area',
+        'area': 'Home Area',  # Legacy
+        'city': 'City Community',
+        'state': 'State Community',
+        'country': 'National Community'
+    }
+    
     communities = []
+    default_community_ids = set(user.get('default_communities', []))
+    
     for cid in user.get('communities', []):
         try:
             comm = await db.get_document('communities', cid)
             if comm:
+                comm_type = comm.get('type', 'other')
                 communities.append({
                     "id": comm['id'],
                     "name": comm['name'],
-                    "type": comm['type'],
+                    "type": comm_type,
+                    "label": comm.get('label') or TYPE_LABELS.get(comm_type, ''),
                     "code": comm.get('code', ''),
                     "member_count": len(comm.get('members', [])),
-                    "subgroups": comm.get('subgroups', [])
+                    "subgroups": comm.get('subgroups', []),
+                    "is_default": cid in default_community_ids or comm.get('is_default', False),
+                    "sort_order": comm.get('sort_order') or TYPE_ORDER.get(comm_type, 99)
                 })
         except:
             pass
+    
+    # Sort by sort_order
+    communities.sort(key=lambda x: x.get('sort_order', 99))
+    
     return communities
 
 

@@ -22,6 +22,9 @@ interface PanchangData {
 
 interface CommunityWithStats extends Community {
   new_messages?: number;
+  label?: string;
+  is_default?: boolean;
+  sort_order?: number;
 }
 
 export default function HomeScreen() {
@@ -87,8 +90,10 @@ export default function HomeScreen() {
 
   const getCommunityIcon = (type: string) => {
     switch (type) {
+      case 'home_area': return 'home';
+      case 'office_area': return 'business';
       case 'area': return 'home';
-      case 'city': return 'business';
+      case 'city': return 'location';
       case 'state': return 'map';
       case 'country': return 'flag';
       default: return 'people';
@@ -97,8 +102,10 @@ export default function HomeScreen() {
 
   const getCommunityColor = (type: string) => {
     switch (type) {
+      case 'home_area': return COLORS.success;
+      case 'office_area': return COLORS.info;
       case 'area': return COLORS.success;
-      case 'city': return COLORS.info;
+      case 'city': return '#9B59B6'; // Purple
       case 'state': return COLORS.warning;
       case 'country': return COLORS.primary;
       default: return COLORS.textSecondary;
@@ -106,27 +113,40 @@ export default function HomeScreen() {
   };
 
   const renderCommunity = ({ item }: { item: CommunityWithStats }) => (
-    <TouchableOpacity
-      style={styles.communityCard}
-      onPress={() => router.push(`/community/${item.id}`)}
-      activeOpacity={0.7}
-    >
-      <View style={[styles.communityIcon, { backgroundColor: `${getCommunityColor(item.type)}20` }]}>
-        <Ionicons name={getCommunityIcon(item.type)} size={24} color={getCommunityColor(item.type)} />
-      </View>
-      <View style={styles.communityInfo}>
-        <Text style={styles.communityName}>{item.name}</Text>
-        <Text style={styles.communityStats}>
-          {item.new_messages ? `${item.new_messages} new messages` : `${item.member_count} members`}
+    <View>
+      {/* Label above card */}
+      {item.label && (
+        <Text style={[styles.communityLabel, { color: getCommunityColor(item.type) }]}>
+          {item.label}
         </Text>
-      </View>
-      {item.new_messages ? (
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{item.new_messages}</Text>
+      )}
+      <TouchableOpacity
+        style={styles.communityCard}
+        onPress={() => router.push(`/community/${item.id}`)}
+        activeOpacity={0.7}
+      >
+        <View style={[styles.communityIcon, { backgroundColor: `${getCommunityColor(item.type)}20` }]}>
+          <Ionicons name={getCommunityIcon(item.type)} size={24} color={getCommunityColor(item.type)} />
         </View>
-      ) : null}
-      <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
-    </TouchableOpacity>
+        <View style={styles.communityInfo}>
+          <Text style={styles.communityName}>{item.name}</Text>
+          <Text style={styles.communityStats}>
+            {item.new_messages ? `${item.new_messages} new messages` : `${item.member_count} members`}
+          </Text>
+        </View>
+        {item.is_default && (
+          <View style={styles.defaultBadge}>
+            <Ionicons name="lock-closed" size={12} color={COLORS.textLight} />
+          </View>
+        )}
+        {item.new_messages ? (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{item.new_messages}</Text>
+          </View>
+        ) : null}
+        <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+      </TouchableOpacity>
+    </View>
   );
 
   if (loading) {
@@ -356,12 +376,21 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   // Community Card Styles
+  communityLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+    marginLeft: 4,
+  },
   communityCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
     padding: SPACING.md,
     borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
   },
   communityIcon: {
     width: 48,
@@ -395,6 +424,9 @@ const styles = StyleSheet.create({
     color: COLORS.textWhite,
     fontSize: 12,
     fontWeight: '600',
+  },
+  defaultBadge: {
+    marginRight: SPACING.sm,
   },
   separator: {
     height: SPACING.sm,
