@@ -183,9 +183,10 @@ export default function ChatScreen() {
               placeholder="Type a message..."
               value={newMessage}
               onChangeText={setNewMessage}
-              multiline
               maxLength={1000}
               placeholderTextColor={COLORS.textLight}
+              returnKeyType="send"
+              onSubmitEditing={handleSend}
             />
             <TouchableOpacity
               style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}
@@ -305,11 +306,13 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     padding: SPACING.md,
     backgroundColor: COLORS.surface,
     borderTopWidth: 1,
     borderTopColor: COLORS.divider,
+    minHeight: 60,
+    maxHeight: 60,
   },
   input: {
     flex: 1,
@@ -317,9 +320,11 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
-    fontSize: 14,
+    fontSize: 16,
     color: COLORS.text,
-    maxHeight: 100,
+    height: 44,
+    maxHeight: 44,
+    minHeight: 44,
   },
   sendButton: {
     width: 44,

@@ -527,13 +527,15 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     padding: SPACING.md,
     paddingTop: SPACING.sm,
     backgroundColor: COLORS.surface,
     borderTopWidth: 1,
     borderTopColor: COLORS.divider,
     flexShrink: 0,
+    minHeight: 60,
+    maxHeight: 60,
   },
   input: {
     flex: 1,
@@ -543,8 +545,9 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.sm,
     fontSize: 16,
     color: COLORS.text,
-    maxHeight: 100,
-    minHeight: 40,
+    height: 44,
+    maxHeight: 44,
+    minHeight: 44,
   },
   sendButton: {
     width: 44,

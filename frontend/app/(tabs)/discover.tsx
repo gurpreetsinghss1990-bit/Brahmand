@@ -299,6 +299,7 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     borderRadius: BORDER_RADIUS.lg,
     marginBottom: SPACING.sm,
+    overflow: 'hidden',
   },
   cardIcon: {
     width: 48,
@@ -332,6 +333,7 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     borderRadius: BORDER_RADIUS.lg,
     marginBottom: SPACING.sm,
+    overflow: 'hidden',
   },
   eventHeader: {
     flexDirection: 'row',
