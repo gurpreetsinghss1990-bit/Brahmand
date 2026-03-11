@@ -10,15 +10,15 @@ import {
 } from 'firebase/auth';
 import { Platform } from 'react-native';
 
-// Firebase configuration
+// Firebase configuration - must match Firebase project "sanatan-lok"
 const firebaseConfig = {
-  apiKey: "AIzaSyDfF0fWQcdfKfXxh0QRFVFp6HYrN9-HYXU",
+  apiKey: "AIzaSyAfMGn2Njs6Wdp8ZTpBS0jDS4KD7B7cTp4",
   authDomain: "sanatan-lok.firebaseapp.com",
   projectId: "sanatan-lok",
   storageBucket: "sanatan-lok.firebasestorage.app",
-  messagingSenderId: "614661191520",
-  appId: "1:614661191520:web:73d000eb76a3568e2a87f7",
-  measurementId: "G-ZHY5H3YRDG"
+  messagingSenderId: "103222994071",
+  appId: "1:103222994071:web:bf5b9aa1775e0c84e8f5d2",
+  measurementId: "G-X7VBBCHKXG"
 };
 
 // Initialize Firebase
