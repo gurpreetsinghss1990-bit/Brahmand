@@ -256,6 +256,20 @@ export default function ProfileScreen() {
         <View style={styles.settingsCard}>
           <TouchableOpacity 
             style={styles.settingsItem}
+            onPress={() => router.push('/settings/location')}
+          >
+            <View style={[styles.settingsIcon, { backgroundColor: `${COLORS.success}15` }]}>
+              <Ionicons name="location" size={20} color={COLORS.success} />
+            </View>
+            <View style={styles.settingsInfo}>
+              <Text style={styles.settingsLabel}>Change Location</Text>
+              <Text style={styles.settingsDesc}>Update home or office area</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.settingsItem}
             onPress={() => router.push('/settings/privacy')}
           >
             <View style={[styles.settingsIcon, { backgroundColor: `${COLORS.primary}15` }]}>

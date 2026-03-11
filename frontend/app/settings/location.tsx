@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,29 +19,28 @@ interface LocationData {
   display_name?: string;
 }
 
-export default function LocationSetupScreen() {
+export default function ChangeLocationScreen() {
   const router = useRouter();
-  const { updateUser } = useAuthStore();
+  const { user, updateUser } = useAuthStore();
 
-  const [homeLocation, setHomeLocation] = useState<LocationData | null>(null);
-  const [officeLocation, setOfficeLocation] = useState<LocationData | null>(null);
+  const [homeLocation, setHomeLocation] = useState<LocationData | null>(
+    user?.home_location || null
+  );
+  const [officeLocation, setOfficeLocation] = useState<LocationData | null>(
+    user?.office_location || null
+  );
   const [loading, setLoading] = useState(false);
   const [detectingHome, setDetectingHome] = useState(false);
   const [detectingOffice, setDetectingOffice] = useState(false);
   const [error, setError] = useState('');
-  const [step, setStep] = useState<'home' | 'office' | 'done'>('home');
-
-  useEffect(() => {
-    // Auto-detect home location on mount
-    detectCurrentLocation('home');
-  }, []);
+  const [hasChanges, setHasChanges] = useState(false);
 
   const requestLocationPermission = async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert(
         'Location Permission Required',
-        'Please enable location access to auto-detect your area. This helps you join local communities.',
+        'Please enable location access to detect your area.',
         [{ text: 'OK' }]
       );
       return false;
@@ -67,7 +66,6 @@ export default function LocationSetupScreen() {
 
       const { latitude, longitude } = location.coords;
       
-      // Call backend to reverse geocode
       const response = await reverseGeocode(latitude, longitude);
       const locationData: LocationData = {
         country: response.data.country,
@@ -81,14 +79,13 @@ export default function LocationSetupScreen() {
 
       if (type === 'home') {
         setHomeLocation(locationData);
-        setStep('office');
       } else {
         setOfficeLocation(locationData);
-        setStep('done');
       }
+      setHasChanges(true);
     } catch (err: any) {
       console.error('Location detection error:', err);
-      setError('Could not detect location. Please try again or enter manually.');
+      setError('Could not detect location. Please try again.');
     } finally {
       if (type === 'home') {
         setDetectingHome(false);
@@ -98,13 +95,9 @@ export default function LocationSetupScreen() {
     }
   };
 
-  const handleSkipOffice = () => {
-    setStep('done');
-  };
-
-  const handleSetupLocations = async () => {
-    if (!homeLocation) {
-      setError('Please set at least your home location');
+  const handleUpdateLocations = async () => {
+    if (!homeLocation || !officeLocation) {
+      setError('Both home and office locations are required');
       return;
     }
 
@@ -114,13 +107,18 @@ export default function LocationSetupScreen() {
     try {
       const response = await setupDualLocation({
         home_location: homeLocation,
-        office_location: officeLocation || undefined,
+        office_location: officeLocation,
       });
 
       updateUser(response.data.user);
-      router.replace('/(tabs)');
+      
+      Alert.alert(
+        'Location Updated',
+        'Your communities have been updated based on your new locations.',
+        [{ text: 'OK', onPress: () => router.back() }]
+      );
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to setup locations. Please try again.');
+      setError(err.response?.data?.detail || 'Failed to update locations. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -154,8 +152,8 @@ export default function LocationSetupScreen() {
           <Text style={styles.countryText}>{location.country}</Text>
           
           <TouchableOpacity style={styles.changeButton} onPress={onDetect}>
-            <Ionicons name="refresh" size={16} color={COLORS.primary} />
-            <Text style={styles.changeText}>Re-detect Location</Text>
+            <Ionicons name="navigate" size={16} color={COLORS.primary} />
+            <Text style={styles.changeText}>Detect New Location</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -172,7 +170,7 @@ export default function LocationSetupScreen() {
           ) : (
             <>
               <Ionicons name="navigate" size={20} color={COLORS.primary} />
-              <Text style={styles.detectText}>Detect Current Location</Text>
+              <Text style={styles.detectText}>Detect Location</Text>
             </>
           )}
         </TouchableOpacity>
@@ -182,34 +180,23 @@ export default function LocationSetupScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Change Location</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <View style={styles.content}>
-          {/* Header */}
-          <View style={styles.header}>
-            <Ionicons name="location" size={48} color={COLORS.primary} />
-            <Text style={styles.title}>Set Your Locations</Text>
-            <Text style={styles.subtitle}>
-              We'll auto-detect your location and add you to local Sanatan communities
+          {/* Info Box */}
+          <View style={styles.infoBox}>
+            <Ionicons name="information-circle" size={20} color={COLORS.info} />
+            <Text style={styles.infoText}>
+              Changing your location will automatically update your community memberships. You'll leave old location communities and join new ones.
             </Text>
-          </View>
-
-          {/* Step Indicator */}
-          <View style={styles.stepIndicator}>
-            <View style={[styles.stepDot, step !== 'home' && styles.stepDotComplete]}>
-              {step !== 'home' ? (
-                <Ionicons name="checkmark" size={14} color={COLORS.textWhite} />
-              ) : (
-                <Text style={styles.stepNumber}>1</Text>
-              )}
-            </View>
-            <View style={[styles.stepLine, step !== 'home' && styles.stepLineComplete]} />
-            <View style={[styles.stepDot, step === 'done' && styles.stepDotComplete]}>
-              {step === 'done' ? (
-                <Ionicons name="checkmark" size={14} color={COLORS.textWhite} />
-              ) : (
-                <Text style={styles.stepNumber}>2</Text>
-              )}
-            </View>
           </View>
 
           {/* Home Location */}
@@ -222,52 +209,55 @@ export default function LocationSetupScreen() {
             COLORS.success
           )}
 
-          {/* Office Location - Show after home is set */}
-          {step !== 'home' && (
-            <>
-              <View style={styles.divider}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>Required</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              {renderLocationCard(
-                'Office Location',
-                officeLocation,
-                detectingOffice,
-                () => detectCurrentLocation('office'),
-                'business',
-                COLORS.info
-              )}
-
-              {!officeLocation && step === 'office' && (
-                <View style={styles.requiredNote}>
-                  <Ionicons name="information-circle" size={16} color={COLORS.warning} />
-                  <Text style={styles.requiredText}>Please detect your office location to continue</Text>
-                </View>
-              )}
-            </>
+          {/* Office Location */}
+          <View style={styles.divider} />
+          {renderLocationCard(
+            'Office Location',
+            officeLocation,
+            detectingOffice,
+            () => detectCurrentLocation('office'),
+            'business',
+            COLORS.info
           )}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
-          {/* Info Box */}
-          <View style={styles.infoBox}>
-            <Ionicons name="information-circle" size={20} color={COLORS.info} />
-            <Text style={styles.infoText}>
-              Both locations are required. You'll be added to 5 communities based on your Home and Office areas for connecting with local Sanatan communities.
-            </Text>
-          </View>
+          {/* Community Preview */}
+          {homeLocation && officeLocation && (
+            <View style={styles.previewBox}>
+              <Text style={styles.previewTitle}>Your Communities After Update:</Text>
+              <View style={styles.previewItem}>
+                <Ionicons name="home" size={16} color={COLORS.success} />
+                <Text style={styles.previewText}>{homeLocation.area} Community</Text>
+              </View>
+              <View style={styles.previewItem}>
+                <Ionicons name="business" size={16} color={COLORS.info} />
+                <Text style={styles.previewText}>{officeLocation.area} Office Community</Text>
+              </View>
+              <View style={styles.previewItem}>
+                <Ionicons name="location" size={16} color="#9B59B6" />
+                <Text style={styles.previewText}>{homeLocation.city} Community</Text>
+              </View>
+              <View style={styles.previewItem}>
+                <Ionicons name="map" size={16} color={COLORS.warning} />
+                <Text style={styles.previewText}>{homeLocation.state} Community</Text>
+              </View>
+              <View style={styles.previewItem}>
+                <Ionicons name="flag" size={16} color={COLORS.primary} />
+                <Text style={styles.previewText}>Bharat Community</Text>
+              </View>
+            </View>
+          )}
 
-          {/* Submit Button - Requires both home and office locations */}
-          {homeLocation && officeLocation ? (
+          {/* Update Button */}
+          {homeLocation && officeLocation && hasChanges && (
             <Button
-              title="Join Communities"
-              onPress={handleSetupLocations}
+              title="Update Location & Communities"
+              onPress={handleUpdateLocations}
               loading={loading}
               style={styles.button}
             />
-          ) : null}
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -279,65 +269,49 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: SPACING.md,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  backButton: {
+    padding: 4,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
   scrollView: {
     flex: 1,
   },
   content: {
     paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.xl,
+    paddingVertical: SPACING.lg,
   },
-  header: {
-    alignItems: 'center',
-    marginBottom: SPACING.xl,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginTop: SPACING.lg,
-    marginBottom: SPACING.xs,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  stepIndicator: {
+  infoBox: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.xl,
+    backgroundColor: `${COLORS.info}15`,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
   },
-  stepDot: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: COLORS.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  stepDotComplete: {
-    backgroundColor: COLORS.success,
-  },
-  stepNumber: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-  },
-  stepLine: {
-    width: 60,
-    height: 2,
-    backgroundColor: COLORS.border,
-  },
-  stepLineComplete: {
-    backgroundColor: COLORS.success,
+  infoText: {
+    flex: 1,
+    marginLeft: SPACING.sm,
+    fontSize: 13,
+    color: COLORS.info,
+    lineHeight: 18,
   },
   locationCard: {
     backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.lg,
-    marginBottom: SPACING.md,
+    padding: SPACING.md,
+    overflow: 'hidden',
   },
   locationHeader: {
     flexDirection: 'row',
@@ -347,13 +321,13 @@ const styles = StyleSheet.create({
   locationIcon: {
     width: 40,
     height: 40,
-    borderRadius: BORDER_RADIUS.md,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: SPACING.md,
   },
   locationTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: COLORS.text,
   },
@@ -413,62 +387,36 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.sm,
   },
   divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: SPACING.lg,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: COLORS.border,
-  },
-  dividerText: {
-    marginHorizontal: SPACING.md,
-    fontSize: 12,
-    color: COLORS.textLight,
-    fontWeight: '500',
-  },
-  skipButton: {
-    alignItems: 'center',
-    paddingVertical: SPACING.sm,
-  },
-  skipText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textDecorationLine: 'underline',
-  },
-  requiredNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.sm,
-    marginTop: SPACING.xs,
-  },
-  requiredText: {
-    fontSize: 13,
-    color: COLORS.warning,
-    marginLeft: SPACING.xs,
+    height: SPACING.md,
   },
   error: {
     color: COLORS.error,
     textAlign: 'center',
     marginVertical: SPACING.md,
   },
-  infoBox: {
-    flexDirection: 'row',
-    backgroundColor: `${COLORS.info}15`,
-    borderRadius: BORDER_RADIUS.md,
+  previewBox: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.md,
-    marginVertical: SPACING.lg,
+    marginTop: SPACING.lg,
   },
-  infoText: {
-    flex: 1,
+  previewTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: SPACING.md,
+  },
+  previewItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: SPACING.xs,
+  },
+  previewText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
     marginLeft: SPACING.sm,
-    fontSize: 13,
-    color: COLORS.info,
-    lineHeight: 18,
   },
   button: {
-    marginTop: SPACING.md,
+    marginTop: SPACING.lg,
   },
 });

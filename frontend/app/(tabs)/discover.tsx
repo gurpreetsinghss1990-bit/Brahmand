@@ -26,8 +26,7 @@ interface Event {
 
 export default function DiscoverScreen() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'communities' | 'temples' | 'events'>('communities');
-  const [communities, setCommunities] = useState([]);
+  const [activeTab, setActiveTab] = useState<'temples' | 'events'>('temples');
   const [temples, setTemples] = useState<Temple[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,12 +34,10 @@ export default function DiscoverScreen() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [commRes, templeRes, eventRes] = await Promise.all([
-        discoverCommunities(),
+      const [templeRes, eventRes] = await Promise.all([
         getTemples().catch(() => ({ data: [] })),
         getNearbyEvents().catch(() => ({ data: [] })),
       ]);
-      setCommunities(commRes.data);
       setTemples(templeRes.data);
       setEvents(eventRes.data);
     } catch (error) {
@@ -82,16 +79,16 @@ export default function DiscoverScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Tab Switcher */}
+      {/* Tab Switcher - Only Temples and Events */}
       <View style={styles.tabContainer}>
-        {['communities', 'temples', 'events'].map((tab) => (
+        {['temples', 'events'].map((tab) => (
           <TouchableOpacity
             key={tab}
             style={[styles.tab, activeTab === tab && styles.tabActive]}
             onPress={() => setActiveTab(tab as any)}
           >
             <Ionicons
-              name={tab === 'communities' ? 'people' : tab === 'temples' ? 'home' : 'calendar'}
+              name={tab === 'temples' ? 'home' : 'calendar'}
               size={18}
               color={activeTab === tab ? COLORS.primary : COLORS.textSecondary}
             />
@@ -109,36 +106,6 @@ export default function DiscoverScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* Communities Tab */}
-        {activeTab === 'communities' && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Popular Communities</Text>
-            {communities.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Ionicons name="people-outline" size={48} color={COLORS.textLight} />
-                <Text style={styles.emptyText}>No communities found</Text>
-              </View>
-            ) : (
-              communities.map((community: any) => (
-                <TouchableOpacity
-                  key={community.id}
-                  style={styles.card}
-                  onPress={() => router.push(`/community/${community.id}`)}
-                >
-                  <View style={styles.cardIcon}>
-                    <Ionicons name="people" size={24} color={COLORS.primary} />
-                  </View>
-                  <View style={styles.cardInfo}>
-                    <Text style={styles.cardTitle}>{community.name}</Text>
-                    <Text style={styles.cardSubtitle}>{community.member_count} members</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
-                </TouchableOpacity>
-              ))
-            )}
-          </View>
-        )}
-
         {/* Temples Tab */}
         {activeTab === 'temples' && (
           <View style={styles.section}>
