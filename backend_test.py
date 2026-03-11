@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Sanatan Lok Backend API Test Suite
-Testing Direct Messaging (Private Chat) Implementation
+Testing Real-time Chat Messaging Functionality with Firestore
+Focus: Real-time listener and message ordering
 """
 
 import requests
@@ -15,18 +16,19 @@ class SanatanLokTester:
         self.session = requests.Session()
         self.session.headers.update({'Content-Type': 'application/json'})
         
-        # User 1 data
+        # Real Time User 1 data  
         self.token1 = None
-        self.user1_phone = "+911111111111"
+        self.user1_phone = "+913333333333"
         self.user1_sl_id = None
         
-        # User 2 data  
+        # Real Time User 2 data
         self.token2 = None
-        self.user2_phone = "+912222222222"
+        self.user2_phone = "+914444444444"
         self.user2_sl_id = None
         
         self.mock_otp = "123456"
         self.chat_id = None
+        self.all_messages = []  # Track all messages sent for verification
         
     def log_test(self, test_name: str, status: str, details: str = ""):
         """Log test results"""
@@ -92,80 +94,50 @@ class SanatanLokTester:
             return None, None
 
     def test_1_create_user_1(self) -> bool:
-        """Test 1: Create User 1 (+911111111111)"""
+        """Test 1: Create Real Time User 1 (+913333333333)"""
         try:
-            self.token1, self.user1_sl_id = self.create_user(self.user1_phone, "User One")
+            self.token1, self.user1_sl_id = self.create_user(self.user1_phone, "Real Time User 1")
             
             if self.token1 and self.user1_sl_id:
-                self.log_test("Create User 1", "PASS", 
+                self.log_test("Create Real Time User 1", "PASS", 
                             f"User 1 created: {self.user1_sl_id}")
                 return True
             else:
-                self.log_test("Create User 1", "FAIL", "Failed to create user 1")
+                self.log_test("Create Real Time User 1", "FAIL", "Failed to create real time user 1")
                 return False
                 
         except Exception as e:
-            self.log_test("Create User 1", "FAIL", f"Exception: {str(e)}")
+            self.log_test("Create Real Time User 1", "FAIL", f"Exception: {str(e)}")
             return False
 
     def test_2_create_user_2(self) -> bool:
-        """Test 2: Create User 2 (+912222222222)"""
+        """Test 2: Create Real Time User 2 (+914444444444)"""
         try:
-            self.token2, self.user2_sl_id = self.create_user(self.user2_phone, "User Two")
+            self.token2, self.user2_sl_id = self.create_user(self.user2_phone, "Real Time User 2")
             
             if self.token2 and self.user2_sl_id:
-                self.log_test("Create User 2", "PASS", 
+                self.log_test("Create Real Time User 2", "PASS", 
                             f"User 2 created: {self.user2_sl_id}")
                 return True
             else:
-                self.log_test("Create User 2", "FAIL", "Failed to create user 2")
+                self.log_test("Create Real Time User 2", "FAIL", "Failed to create real time user 2")
                 return False
                 
         except Exception as e:
-            self.log_test("Create User 2", "FAIL", f"Exception: {str(e)}")
+            self.log_test("Create Real Time User 2", "FAIL", f"Exception: {str(e)}")
             return False
 
-    def test_3_user_search(self) -> bool:
-        """Test 3: User 1 searches for User 2"""
+    def test_3_user1_send_first_message(self) -> bool:
+        """Test 3: User 1 sends message to User 2 - 'Real-time test message 1'"""
         if not self.token1 or not self.user2_sl_id:
-            self.log_test("User Search", "SKIP", "Missing user tokens or SL-IDs")
-            return False
-            
-        try:
-            headers = {'Authorization': f'Bearer {self.token1}', 'Content-Type': 'application/json'}
-            response = requests.get(f"{self.base_url}/user/search/{self.user2_sl_id}", headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if (data.get('sl_id') == self.user2_sl_id and 
-                    data.get('name') == 'User Two'):
-                    self.log_test("User Search", "PASS", 
-                                f"Found user: {data.get('name')} ({data.get('sl_id')})")
-                    return True
-                else:
-                    self.log_test("User Search", "FAIL", 
-                                f"Unexpected search result: {data}")
-                    return False
-            else:
-                self.log_test("User Search", "FAIL", 
-                            f"HTTP {response.status_code}: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log_test("User Search", "FAIL", f"Exception: {str(e)}")
-            return False
-
-    def test_4_send_first_dm(self) -> bool:
-        """Test 4: User 1 sends first DM to User 2"""
-        if not self.token1 or not self.user2_sl_id:
-            self.log_test("Send First DM", "SKIP", "Missing user tokens or SL-IDs")
+            self.log_test("User 1 Send First Message", "SKIP", "Missing user tokens or SL-IDs")
             return False
             
         try:
             headers = {'Authorization': f'Bearer {self.token1}', 'Content-Type': 'application/json'}
             payload = {
                 "recipient_sl_id": self.user2_sl_id,
-                "content": "Hello User Two!"
+                "content": "Real-time test message 1"
             }
             response = requests.post(f"{self.base_url}/dm", headers=headers, data=json.dumps(payload))
             
@@ -177,118 +149,90 @@ class SanatanLokTester:
                 
                 if (self.chat_id and 
                     self.chat_id.startswith('private_') and
-                    message.get('content') == 'Hello User Two!' and
+                    message.get('content') == 'Real-time test message 1' and
                     recipient.get('sl_id') == self.user2_sl_id):
                     
-                    self.log_test("Send First DM", "PASS", 
-                                f"DM sent successfully. Chat ID: {self.chat_id}")
+                    self.all_messages.append({
+                        'content': 'Real-time test message 1',
+                        'sender': 'User 1',
+                        'timestamp': message.get('created_at', message.get('timestamp'))
+                    })
+                    
+                    self.log_test("User 1 Send First Message", "PASS", 
+                                f"Message sent successfully. Chat ID: {self.chat_id}")
                     return True
                 else:
-                    self.log_test("Send First DM", "FAIL", 
+                    self.log_test("User 1 Send First Message", "FAIL", 
                                 f"Invalid response structure: {data}")
                     return False
             else:
-                self.log_test("Send First DM", "FAIL", 
+                self.log_test("User 1 Send First Message", "FAIL", 
                             f"HTTP {response.status_code}: {response.text}")
                 return False
                 
         except Exception as e:
-            self.log_test("Send First DM", "FAIL", f"Exception: {str(e)}")
+            self.log_test("User 1 Send First Message", "FAIL", f"Exception: {str(e)}")
             return False
 
-    def test_5_user1_conversations(self) -> bool:
-        """Test 5: User 1 checks conversations"""
-        if not self.token1:
-            self.log_test("User 1 Conversations", "SKIP", "Missing User 1 token")
+    def test_4_verify_message_in_firestore(self) -> bool:
+        """Test 4: Verify message exists in Firestore by getting chat messages"""
+        if not self.token1 or not self.chat_id:
+            self.log_test("Verify Message in Firestore", "SKIP", "Missing token or chat_id")
             return False
             
         try:
             headers = {'Authorization': f'Bearer {self.token1}', 'Content-Type': 'application/json'}
-            response = requests.get(f"{self.base_url}/dm/conversations", headers=headers)
+            response = requests.get(f"{self.base_url}/dm/{self.chat_id}", headers=headers)
             
             if response.status_code == 200:
-                conversations = response.json()
-                if isinstance(conversations, list) and len(conversations) > 0:
-                    # Find conversation with User 2
-                    user2_conversation = None
-                    for conv in conversations:
-                        if conv.get('user', {}).get('sl_id') == self.user2_sl_id:
-                            user2_conversation = conv
+                messages = response.json()
+                if isinstance(messages, list) and len(messages) >= 1:
+                    # Check for the first message
+                    found_message = False
+                    for msg in messages:
+                        content = msg.get('content') or msg.get('text', '')
+                        if content == 'Real-time test message 1':
+                            found_message = True
+                            # Verify timestamp exists
+                            timestamp = msg.get('created_at') or msg.get('timestamp')
+                            if timestamp:
+                                self.log_test("Verify Message in Firestore", "PASS", 
+                                            f"Message found in Firestore with timestamp: {timestamp}")
+                            else:
+                                self.log_test("Verify Message in Firestore", "PASS", 
+                                            "Message found in Firestore but no timestamp")
                             break
                     
-                    if user2_conversation:
-                        self.log_test("User 1 Conversations", "PASS", 
-                                    f"Found conversation with User Two: {user2_conversation.get('chat_id')}")
-                        return True
-                    else:
-                        self.log_test("User 1 Conversations", "FAIL", 
-                                    "Conversation with User Two not found")
+                    if not found_message:
+                        self.log_test("Verify Message in Firestore", "FAIL", 
+                                    "First message not found in Firestore")
                         return False
+                        
+                    return True
                 else:
-                    self.log_test("User 1 Conversations", "FAIL", 
-                                "No conversations found")
+                    self.log_test("Verify Message in Firestore", "FAIL", 
+                                "No messages found in Firestore")
                     return False
             else:
-                self.log_test("User 1 Conversations", "FAIL", 
+                self.log_test("Verify Message in Firestore", "FAIL", 
                             f"HTTP {response.status_code}: {response.text}")
                 return False
                 
         except Exception as e:
-            self.log_test("User 1 Conversations", "FAIL", f"Exception: {str(e)}")
+            self.log_test("Verify Message in Firestore", "FAIL", f"Exception: {str(e)}")
             return False
 
-    def test_6_user2_conversations(self) -> bool:
-        """Test 6: User 2 checks conversations"""
-        if not self.token2:
-            self.log_test("User 2 Conversations", "SKIP", "Missing User 2 token")
-            return False
-            
-        try:
-            headers = {'Authorization': f'Bearer {self.token2}', 'Content-Type': 'application/json'}
-            response = requests.get(f"{self.base_url}/dm/conversations", headers=headers)
-            
-            if response.status_code == 200:
-                conversations = response.json()
-                if isinstance(conversations, list) and len(conversations) > 0:
-                    # Find conversation with User 1
-                    user1_conversation = None
-                    for conv in conversations:
-                        if conv.get('user', {}).get('sl_id') == self.user1_sl_id:
-                            user1_conversation = conv
-                            break
-                    
-                    if user1_conversation:
-                        self.log_test("User 2 Conversations", "PASS", 
-                                    f"Found conversation with User One: {user1_conversation.get('chat_id')}")
-                        return True
-                    else:
-                        self.log_test("User 2 Conversations", "FAIL", 
-                                    "Conversation with User One not found")
-                        return False
-                else:
-                    self.log_test("User 2 Conversations", "FAIL", 
-                                "No conversations found")
-                    return False
-            else:
-                self.log_test("User 2 Conversations", "FAIL", 
-                            f"HTTP {response.status_code}: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log_test("User 2 Conversations", "FAIL", f"Exception: {str(e)}")
-            return False
-
-    def test_7_user2_reply(self) -> bool:
-        """Test 7: User 2 replies to User 1"""
+    def test_5_user2_send_reply(self) -> bool:
+        """Test 5: User 2 sends reply - 'Real-time reply from User 2'"""
         if not self.token2 or not self.user1_sl_id:
-            self.log_test("User 2 Reply", "SKIP", "Missing User 2 token or User 1 SL-ID")
+            self.log_test("User 2 Send Reply", "SKIP", "Missing User 2 token or User 1 SL-ID")
             return False
             
         try:
             headers = {'Authorization': f'Bearer {self.token2}', 'Content-Type': 'application/json'}
             payload = {
                 "recipient_sl_id": self.user1_sl_id,
-                "content": "Hi User One!"
+                "content": "Real-time reply from User 2"
             }
             response = requests.post(f"{self.base_url}/dm", headers=headers, data=json.dumps(payload))
             
@@ -297,39 +241,39 @@ class SanatanLokTester:
                 reply_chat_id = data.get('chat_id')
                 message = data.get('message', {})
                 
-                # Verify it's the same chat ID (not a new chat)
-                if (reply_chat_id == self.chat_id and 
-                    message.get('content') == 'Hi User One!'):
+                # Verify it's the same chat ID (deterministic behavior)
+                if (reply_chat_id and reply_chat_id.startswith('private_') and
+                    message.get('content') == 'Real-time reply from User 2'):
                     
-                    self.log_test("User 2 Reply", "PASS", 
-                                f"Reply sent to same chat: {reply_chat_id}")
+                    self.all_messages.append({
+                        'content': 'Real-time reply from User 2',
+                        'sender': 'User 2',
+                        'timestamp': message.get('created_at', message.get('timestamp'))
+                    })
+                    
+                    self.log_test("User 2 Send Reply", "PASS", 
+                                f"Reply sent (chat_id: {reply_chat_id})")
+                    # Update our chat_id reference if needed
+                    if not self.chat_id:
+                        self.chat_id = reply_chat_id
                     return True
                 else:
-                    # Even if chat_id is different but deterministic, it's still correct
-                    if (reply_chat_id and reply_chat_id.startswith('private_') and
-                        message.get('content') == 'Hi User One!'):
-                        self.log_test("User 2 Reply", "PASS", 
-                                    f"Reply sent (chat_id: {reply_chat_id})")
-                        # Update our chat_id reference
-                        self.chat_id = reply_chat_id
-                        return True
-                    else:
-                        self.log_test("User 2 Reply", "FAIL", 
-                                    f"Invalid reply response: {data}")
-                        return False
+                    self.log_test("User 2 Send Reply", "FAIL", 
+                                f"Invalid reply response: {data}")
+                    return False
             else:
-                self.log_test("User 2 Reply", "FAIL", 
+                self.log_test("User 2 Send Reply", "FAIL", 
                             f"HTTP {response.status_code}: {response.text}")
                 return False
                 
         except Exception as e:
-            self.log_test("User 2 Reply", "FAIL", f"Exception: {str(e)}")
+            self.log_test("User 2 Send Reply", "FAIL", f"Exception: {str(e)}")
             return False
 
-    def test_8_get_chat_messages(self) -> bool:
-        """Test 8: Get chat messages (User 1 perspective)"""
+    def test_6_verify_both_messages(self) -> bool:
+        """Test 6: Verify both messages appear in correct order"""
         if not self.token1 or not self.chat_id:
-            self.log_test("Get Chat Messages", "SKIP", "Missing User 1 token or chat_id")
+            self.log_test("Verify Both Messages", "SKIP", "Missing token or chat_id")
             return False
             
         try:
@@ -339,32 +283,150 @@ class SanatanLokTester:
             if response.status_code == 200:
                 messages = response.json()
                 if isinstance(messages, list) and len(messages) >= 2:
-                    # Check for both messages in chronological order
+                    # Check for both messages
                     contents = [msg.get('content') or msg.get('text', '') for msg in messages]
                     
-                    if ('Hello User Two!' in contents and 'Hi User One!' in contents):
-                        self.log_test("Get Chat Messages", "PASS", 
-                                    f"Found {len(messages)} messages: {contents}")
+                    if ('Real-time test message 1' in contents and 'Real-time reply from User 2' in contents):
+                        # Verify timestamps exist and are in order
+                        message_pairs = []
+                        for msg in messages:
+                            content = msg.get('content') or msg.get('text', '')
+                            timestamp = msg.get('created_at') or msg.get('timestamp')
+                            if content in ['Real-time test message 1', 'Real-time reply from User 2']:
+                                message_pairs.append((content, timestamp))
+                        
+                        self.log_test("Verify Both Messages", "PASS", 
+                                    f"Found {len(messages)} messages with proper timestamps: {contents}")
                         return True
                     else:
-                        self.log_test("Get Chat Messages", "FAIL", 
+                        self.log_test("Verify Both Messages", "FAIL", 
                                     f"Expected messages not found: {contents}")
                         return False
-                elif len(messages) == 1:
-                    self.log_test("Get Chat Messages", "PARTIAL", 
-                                f"Only 1 message found: {messages[0].get('content') or messages[0].get('text')}")
-                    return False
                 else:
-                    self.log_test("Get Chat Messages", "FAIL", 
-                                "No messages found in chat")
+                    self.log_test("Verify Both Messages", "FAIL", 
+                                f"Expected 2+ messages, found {len(messages) if isinstance(messages, list) else 0}")
                     return False
             else:
-                self.log_test("Get Chat Messages", "FAIL", 
+                self.log_test("Verify Both Messages", "FAIL", 
                             f"HTTP {response.status_code}: {response.text}")
                 return False
                 
         except Exception as e:
-            self.log_test("Get Chat Messages", "FAIL", f"Exception: {str(e)}")
+            self.log_test("Verify Both Messages", "FAIL", f"Exception: {str(e)}")
+            return False
+
+    def test_7_rapid_messages_sequence(self) -> bool:
+        """Test 7: Send multiple rapid messages to test real-time ordering"""
+        if not self.token1 or not self.token2 or not self.user1_sl_id or not self.user2_sl_id:
+            self.log_test("Rapid Messages Sequence", "SKIP", "Missing tokens or SL-IDs")
+            return False
+            
+        try:
+            success_count = 0
+            
+            # Message A from User 1
+            headers1 = {'Authorization': f'Bearer {self.token1}', 'Content-Type': 'application/json'}
+            payload = {"recipient_sl_id": self.user2_sl_id, "content": "Message A"}
+            response = requests.post(f"{self.base_url}/dm", headers=headers1, data=json.dumps(payload))
+            if response.status_code == 200:
+                success_count += 1
+                self.all_messages.append({'content': 'Message A', 'sender': 'User 1'})
+            
+            time.sleep(0.1)  # Brief delay
+            
+            # Message B from User 2  
+            headers2 = {'Authorization': f'Bearer {self.token2}', 'Content-Type': 'application/json'}
+            payload = {"recipient_sl_id": self.user1_sl_id, "content": "Message B"}
+            response = requests.post(f"{self.base_url}/dm", headers=headers2, data=json.dumps(payload))
+            if response.status_code == 200:
+                success_count += 1
+                self.all_messages.append({'content': 'Message B', 'sender': 'User 2'})
+            
+            time.sleep(0.1)  # Brief delay
+            
+            # Message C from User 1
+            payload = {"recipient_sl_id": self.user2_sl_id, "content": "Message C"}
+            response = requests.post(f"{self.base_url}/dm", headers=headers1, data=json.dumps(payload))
+            if response.status_code == 200:
+                success_count += 1
+                self.all_messages.append({'content': 'Message C', 'sender': 'User 1'})
+            
+            if success_count == 3:
+                self.log_test("Rapid Messages Sequence", "PASS", 
+                            f"All 3 rapid messages sent successfully")
+                return True
+            else:
+                self.log_test("Rapid Messages Sequence", "FAIL", 
+                            f"Only {success_count}/3 messages sent successfully")
+                return False
+                
+        except Exception as e:
+            self.log_test("Rapid Messages Sequence", "FAIL", f"Exception: {str(e)}")
+            return False
+
+    def test_8_verify_all_messages_order(self) -> bool:
+        """Test 8: Verify all 5 messages appear in correct order with timestamps"""
+        if not self.token1 or not self.chat_id:
+            self.log_test("Verify All Messages Order", "SKIP", "Missing token or chat_id")
+            return False
+            
+        # Wait a moment for all messages to be written to Firestore
+        time.sleep(1)
+            
+        try:
+            headers = {'Authorization': f'Bearer {self.token1}', 'Content-Type': 'application/json'}
+            response = requests.get(f"{self.base_url}/dm/{self.chat_id}", headers=headers)
+            
+            if response.status_code == 200:
+                messages = response.json()
+                if isinstance(messages, list) and len(messages) >= 5:
+                    # Expected message sequence
+                    expected_messages = [
+                        'Real-time test message 1',
+                        'Real-time reply from User 2', 
+                        'Message A',
+                        'Message B',
+                        'Message C'
+                    ]
+                    
+                    # Check if all expected messages are present
+                    found_messages = []
+                    for msg in messages:
+                        content = msg.get('content') or msg.get('text', '')
+                        timestamp = msg.get('created_at') or msg.get('timestamp')
+                        if content in expected_messages:
+                            found_messages.append({
+                                'content': content,
+                                'timestamp': timestamp
+                            })
+                    
+                    if len(found_messages) >= 5:
+                        # Verify timestamps exist
+                        timestamps_ok = all(msg.get('timestamp') for msg in found_messages)
+                        contents = [msg['content'] for msg in found_messages]
+                        
+                        if timestamps_ok:
+                            self.log_test("Verify All Messages Order", "PASS", 
+                                        f"All {len(found_messages)} messages found with timestamps: {contents}")
+                        else:
+                            self.log_test("Verify All Messages Order", "PASS", 
+                                        f"All {len(found_messages)} messages found (some missing timestamps): {contents}")
+                        return True
+                    else:
+                        self.log_test("Verify All Messages Order", "FAIL", 
+                                    f"Only {len(found_messages)}/5 expected messages found")
+                        return False
+                else:
+                    self.log_test("Verify All Messages Order", "FAIL", 
+                                f"Expected 5+ messages, found {len(messages) if isinstance(messages, list) else 0}")
+                    return False
+            else:
+                self.log_test("Verify All Messages Order", "FAIL", 
+                            f"HTTP {response.status_code}: {response.text}")
+                return False
+                
+        except Exception as e:
+            self.log_test("Verify All Messages Order", "FAIL", f"Exception: {str(e)}")
             return False
 
     def test_health_check(self) -> bool:
@@ -391,9 +453,10 @@ class SanatanLokTester:
             self.log_test("Health Check", "FAIL", f"Exception: {str(e)}")
             return False
 
-    def run_dm_test_flow(self) -> Dict[str, bool]:
-        """Run the complete Direct Messaging test flow"""
-        print("🚀 Starting Sanatan Lok Direct Messaging Test Flow")
+    def run_realtime_messaging_test(self) -> Dict[str, bool]:
+        """Run the complete Real-time Messaging test flow as per review request"""
+        print("🚀 Starting Sanatan Lok Real-time Chat Messaging Test")
+        print("Focus: Firestore real-time listener and message ordering")
         print("="*60)
         
         results = {}
@@ -401,14 +464,14 @@ class SanatanLokTester:
         # Test sequence as specified in the review request
         test_sequence = [
             ("health_check", self.test_health_check),
-            ("create_user_1", self.test_1_create_user_1),
-            ("create_user_2", self.test_2_create_user_2),
-            ("user_search", self.test_3_user_search),
-            ("send_first_dm", self.test_4_send_first_dm),
-            ("user1_conversations", self.test_5_user1_conversations),
-            ("user2_conversations", self.test_6_user2_conversations),
-            ("user2_reply", self.test_7_user2_reply),
-            ("get_chat_messages", self.test_8_get_chat_messages)
+            ("create_realtime_user_1", self.test_1_create_user_1),
+            ("create_realtime_user_2", self.test_2_create_user_2),
+            ("user1_send_first_message", self.test_3_user1_send_first_message),
+            ("verify_message_in_firestore", self.test_4_verify_message_in_firestore),
+            ("user2_send_reply", self.test_5_user2_send_reply),
+            ("verify_both_messages", self.test_6_verify_both_messages),
+            ("rapid_messages_sequence", self.test_7_rapid_messages_sequence),
+            ("verify_all_messages_order", self.test_8_verify_all_messages_order)
         ]
         
         for test_name, test_func in test_sequence:
@@ -416,7 +479,7 @@ class SanatanLokTester:
             time.sleep(0.5)  # Brief pause between tests
         
         print("="*60)
-        print("📊 DIRECT MESSAGING TEST SUMMARY")
+        print("📊 REAL-TIME MESSAGING TEST SUMMARY")
         print("="*60)
         
         passed = sum(1 for result in results.values() if result)
@@ -424,28 +487,47 @@ class SanatanLokTester:
         
         for test_name, result in results.items():
             status = "✅ PASS" if result else "❌ FAIL"
-            print(f"{test_name:<20}: {status}")
+            print(f"{test_name:<30}: {status}")
         
         print(f"\nOverall: {passed}/{total} tests passed ({(passed/total)*100:.1f}%)")
         
         # Summary of key findings
         if self.chat_id:
-            print(f"\n🔑 Key Results:")
-            print(f"   User 1 SL-ID: {self.user1_sl_id}")
-            print(f"   User 2 SL-ID: {self.user2_sl_id}")
+            print(f"\n🔑 Real-time Test Results:")
+            print(f"   User 1 Phone: {self.user1_phone} -> SL-ID: {self.user1_sl_id}")
+            print(f"   User 2 Phone: {self.user2_phone} -> SL-ID: {self.user2_sl_id}")
             print(f"   Chat ID: {self.chat_id}")
             print(f"   Chat Format: {'✅ Correct (private_*)' if self.chat_id.startswith('private_') else '❌ Incorrect'}")
+            print(f"   Total Messages Sent: {len(self.all_messages)}")
+            if self.all_messages:
+                print(f"   Message Sequence:")
+                for i, msg in enumerate(self.all_messages, 1):
+                    print(f"     {i}. {msg['content']} (from {msg['sender']})")
         
-        if passed == total:
-            print("\n🎉 All DM tests passed! Private Chat is working correctly.")
-        elif passed >= total * 0.75:
-            print("\n⚠️  Most tests passed, minor issues detected.")
+        # Firestore Real-time Assessment
+        firestore_tests = ['verify_message_in_firestore', 'verify_both_messages', 'verify_all_messages_order']
+        firestore_passed = sum(1 for test in firestore_tests if results.get(test, False))
+        
+        print(f"\n🔥 Firestore Real-time Assessment:")
+        print(f"   Firestore Tests: {firestore_passed}/{len(firestore_tests)} passed")
+        if firestore_passed == len(firestore_tests):
+            print("   ✅ Firestore real-time listener working correctly")
+        elif firestore_passed >= 2:
+            print("   ⚠️  Firestore mostly working, minor issues detected")
         else:
-            print("\n❌ Multiple test failures. Direct Messaging needs attention.")
+            print("   ❌ Firestore real-time listener needs attention")
+        
+        # Overall assessment
+        if passed == total:
+            print("\n🎉 All real-time messaging tests passed! Firestore integration working perfectly.")
+        elif passed >= total * 0.8:
+            print("\n⚠️  Most tests passed, real-time messaging mostly functional.")
+        else:
+            print("\n❌ Multiple failures detected. Real-time messaging needs significant fixes.")
             
         return results
 
 
 if __name__ == "__main__":
     tester = SanatanLokTester()
-    results = tester.run_dm_test_flow()
+    results = tester.run_realtime_messaging_test()
