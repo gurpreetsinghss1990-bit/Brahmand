@@ -40,6 +40,15 @@ export const updateProfile = (data: { name?: string; photo?: string; language?: 
 export const setupLocation = (location: { country: string; state: string; city: string; area: string }) => 
   api.post('/user/location', location);
 
+export const setupDualLocation = (locations: { 
+  home_location?: { country: string; state: string; city: string; area: string; latitude?: number; longitude?: number };
+  office_location?: { country: string; state: string; city: string; area: string; latitude?: number; longitude?: number };
+}) => 
+  api.post('/user/dual-location', locations);
+
+export const reverseGeocode = (latitude: number, longitude: number) => 
+  api.post('/geocode/reverse', { latitude, longitude });
+
 export const searchUserBySLId = (slId: string) => 
   api.get(`/user/search/${slId}`);
 

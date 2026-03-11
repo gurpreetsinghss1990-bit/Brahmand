@@ -75,6 +75,14 @@ class LocationSetup(BaseModel):
     city: str
     area: str
 
+class DualLocationSetup(BaseModel):
+    home_location: Optional[Dict[str, Any]] = None  # {country, state, city, area, lat, lng}
+    office_location: Optional[Dict[str, Any]] = None  # {country, state, city, area, lat, lng}
+
+class ReverseGeocodeRequest(BaseModel):
+    latitude: float
+    longitude: float
+
 class CircleCreate(BaseModel):
     name: str
 
@@ -351,7 +359,7 @@ async def update_profile(update: UserUpdate, token_data: dict = Depends(verify_t
 
 @api_router.post("/user/location")
 async def setup_location(location: LocationSetup, token_data: dict = Depends(verify_token)):
-    """Setup user location and join communities"""
+    """Setup user location and join communities (legacy single location)"""
     user_id = token_data["user_id"]
     
     location_data = {
@@ -400,7 +408,7 @@ async def setup_location(location: LocationSetup, token_data: dict = Depends(ver
     await db.users.update_one(
         {"_id": ObjectId(user_id)},
         {
-            "$set": {"location": location_data},
+            "$set": {"location": location_data, "home_location": location_data},
             "$addToSet": {"communities": {"$each": community_ids}}
         }
     )
@@ -418,6 +426,163 @@ async def setup_location(location: LocationSetup, token_data: dict = Depends(ver
         "user": serialize_doc(user),
         "communities_joined": len(community_ids)
     }
+
+@api_router.post("/user/dual-location")
+async def setup_dual_location(locations: DualLocationSetup, token_data: dict = Depends(verify_token)):
+    """Setup user's home and office locations and join communities for both"""
+    user_id = token_data["user_id"]
+    community_ids = []
+    
+    async def add_location_communities(loc_data: dict, loc_type: str):
+        """Add communities for a location"""
+        ids = []
+        
+        # Area Community
+        area_community = await get_or_create_community(
+            f"{loc_data['area']} Sanatan Lok",
+            "area",
+            loc_data
+        )
+        ids.append(str(area_community["_id"]))
+        
+        # City Community
+        city_community = await get_or_create_community(
+            f"{loc_data['city']} Sanatan Lok",
+            "city",
+            {"country": loc_data['country'], "state": loc_data['state'], "city": loc_data['city']}
+        )
+        ids.append(str(city_community["_id"]))
+        
+        # State Community
+        state_community = await get_or_create_community(
+            f"{loc_data['state']} Sanatan Lok",
+            "state",
+            {"country": loc_data['country'], "state": loc_data['state']}
+        )
+        ids.append(str(state_community["_id"]))
+        
+        # Country Community
+        country_community = await get_or_create_community(
+            f"{loc_data['country']} Sanatan Lok",
+            "country",
+            {"country": loc_data['country']}
+        )
+        ids.append(str(country_community["_id"]))
+        
+        return ids
+    
+    update_data = {}
+    
+    # Process home location
+    if locations.home_location:
+        home_ids = await add_location_communities(locations.home_location, "home")
+        community_ids.extend(home_ids)
+        update_data["home_location"] = locations.home_location
+        update_data["location"] = locations.home_location  # Primary location
+    
+    # Process office location
+    if locations.office_location:
+        office_ids = await add_location_communities(locations.office_location, "office")
+        community_ids.extend(office_ids)
+        update_data["office_location"] = locations.office_location
+    
+    # Remove duplicates
+    community_ids = list(set(community_ids))
+    
+    # Update user
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {
+            "$set": update_data,
+            "$addToSet": {"communities": {"$each": community_ids}}
+        }
+    )
+    
+    # Add user to community members
+    for cid in community_ids:
+        await db.communities.update_one(
+            {"_id": ObjectId(cid)},
+            {"$addToSet": {"members": user_id}}
+        )
+    
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    return {
+        "message": "Locations set successfully",
+        "user": serialize_doc(user),
+        "communities_joined": len(community_ids)
+    }
+
+@api_router.post("/geocode/reverse")
+async def reverse_geocode(request: ReverseGeocodeRequest):
+    """Reverse geocode coordinates to get location details using OpenStreetMap Nominatim"""
+    import aiohttp
+    
+    try:
+        url = f"https://nominatim.openstreetmap.org/reverse"
+        params = {
+            "lat": request.latitude,
+            "lon": request.longitude,
+            "format": "json",
+            "addressdetails": 1
+        }
+        headers = {
+            "User-Agent": "SanatanLok/1.0"
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    address = data.get("address", {})
+                    
+                    # Extract location components
+                    area = (
+                        address.get("suburb") or 
+                        address.get("neighbourhood") or 
+                        address.get("village") or 
+                        address.get("town") or
+                        address.get("city_district") or
+                        "Unknown Area"
+                    )
+                    
+                    # For Indian cities, check state_district for city name
+                    city = (
+                        address.get("city") or 
+                        address.get("town") or 
+                        address.get("municipality") or
+                        address.get("state_district", "").replace(" District", "") or
+                        address.get("county") or
+                        "Unknown City"
+                    )
+                    # Clean up city name
+                    if "Suburban" in city:
+                        city = city.replace(" Suburban", "").strip()
+                    
+                    state = (
+                        address.get("state") or 
+                        address.get("region") or
+                        "Unknown State"
+                    )
+                    
+                    country = address.get("country", "Bharat")
+                    if country == "India":
+                        country = "Bharat"
+                    
+                    return {
+                        "country": country,
+                        "state": state,
+                        "city": city,
+                        "area": area,
+                        "latitude": request.latitude,
+                        "longitude": request.longitude,
+                        "display_name": data.get("display_name", ""),
+                        "raw_address": address
+                    }
+                else:
+                    raise HTTPException(status_code=500, detail="Geocoding service unavailable")
+    except aiohttp.ClientError as e:
+        logger.error(f"Geocoding error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch location data")
 
 @api_router.get("/user/search/{sl_id}")
 async def search_user_by_sl_id(sl_id: str, token_data: dict = Depends(verify_token)):

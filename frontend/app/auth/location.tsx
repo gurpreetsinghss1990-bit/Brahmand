@@ -1,29 +1,110 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Platform, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Input } from '../../src/components/Input';
+import * as Location from 'expo-location';
 import { Button } from '../../src/components/Button';
-import { setupLocation } from '../../src/services/api';
+import { setupDualLocation, reverseGeocode } from '../../src/services/api';
 import { useAuthStore } from '../../src/store/authStore';
-import { COLORS, SPACING, BORDER_RADIUS, INDIA_STATES } from '../../src/constants/theme';
+import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
+
+interface LocationData {
+  country: string;
+  state: string;
+  city: string;
+  area: string;
+  latitude?: number;
+  longitude?: number;
+  display_name?: string;
+}
 
 export default function LocationSetupScreen() {
   const router = useRouter();
   const { updateUser } = useAuthStore();
 
-  const [country] = useState('Bharat');
-  const [state, setState] = useState('');
-  const [city, setCity] = useState('');
-  const [area, setArea] = useState('');
+  const [homeLocation, setHomeLocation] = useState<LocationData | null>(null);
+  const [officeLocation, setOfficeLocation] = useState<LocationData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [detectingHome, setDetectingHome] = useState(false);
+  const [detectingOffice, setDetectingOffice] = useState(false);
   const [error, setError] = useState('');
-  const [showStates, setShowStates] = useState(false);
+  const [step, setStep] = useState<'home' | 'office' | 'done'>('home');
 
-  const handleSetupLocation = async () => {
-    if (!state || !city.trim() || !area.trim()) {
-      setError('Please fill in all location fields');
+  useEffect(() => {
+    // Auto-detect home location on mount
+    detectCurrentLocation('home');
+  }, []);
+
+  const requestLocationPermission = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(
+        'Location Permission Required',
+        'Please enable location access to auto-detect your area. This helps you join local communities.',
+        [{ text: 'OK' }]
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const detectCurrentLocation = async (type: 'home' | 'office') => {
+    const hasPermission = await requestLocationPermission();
+    if (!hasPermission) return;
+
+    if (type === 'home') {
+      setDetectingHome(true);
+    } else {
+      setDetectingOffice(true);
+    }
+    setError('');
+
+    try {
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const { latitude, longitude } = location.coords;
+      
+      // Call backend to reverse geocode
+      const response = await reverseGeocode(latitude, longitude);
+      const locationData: LocationData = {
+        country: response.data.country,
+        state: response.data.state,
+        city: response.data.city,
+        area: response.data.area,
+        latitude,
+        longitude,
+        display_name: response.data.display_name,
+      };
+
+      if (type === 'home') {
+        setHomeLocation(locationData);
+        setStep('office');
+      } else {
+        setOfficeLocation(locationData);
+        setStep('done');
+      }
+    } catch (err: any) {
+      console.error('Location detection error:', err);
+      setError('Could not detect location. Please try again or enter manually.');
+    } finally {
+      if (type === 'home') {
+        setDetectingHome(false);
+      } else {
+        setDetectingOffice(false);
+      }
+    }
+  };
+
+  const handleSkipOffice = () => {
+    setStep('done');
+  };
+
+  const handleSetupLocations = async () => {
+    if (!homeLocation) {
+      setError('Please set at least your home location');
       return;
     }
 
@@ -31,113 +112,163 @@ export default function LocationSetupScreen() {
     setError('');
 
     try {
-      const response = await setupLocation({
-        country,
-        state,
-        city: city.trim(),
-        area: area.trim(),
+      const response = await setupDualLocation({
+        home_location: homeLocation,
+        office_location: officeLocation || undefined,
       });
 
       updateUser(response.data.user);
       router.replace('/(tabs)');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to setup location. Please try again.');
+      setError(err.response?.data?.detail || 'Failed to setup locations. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  const renderLocationCard = (
+    title: string,
+    location: LocationData | null,
+    isDetecting: boolean,
+    onDetect: () => void,
+    icon: keyof typeof Ionicons.glyphMap,
+    color: string
+  ) => (
+    <View style={styles.locationCard}>
+      <View style={styles.locationHeader}>
+        <View style={[styles.locationIcon, { backgroundColor: `${color}20` }]}>
+          <Ionicons name={icon} size={24} color={color} />
+        </View>
+        <Text style={styles.locationTitle}>{title}</Text>
+      </View>
+
+      {location ? (
+        <View style={styles.locationDetails}>
+          <View style={styles.locationRow}>
+            <Ionicons name="location" size={16} color={COLORS.success} />
+            <Text style={styles.areaText}>{location.area}</Text>
+          </View>
+          <Text style={styles.addressText}>
+            {location.city}, {location.state}
+          </Text>
+          <Text style={styles.countryText}>{location.country}</Text>
+          
+          <TouchableOpacity style={styles.changeButton} onPress={onDetect}>
+            <Ionicons name="refresh" size={16} color={COLORS.primary} />
+            <Text style={styles.changeText}>Re-detect Location</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity 
+          style={styles.detectButton} 
+          onPress={onDetect}
+          disabled={isDetecting}
+        >
+          {isDetecting ? (
+            <>
+              <ActivityIndicator size="small" color={COLORS.primary} />
+              <Text style={styles.detectingText}>Detecting your location...</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="navigate" size={20} color={COLORS.primary} />
+              <Text style={styles.detectText}>Detect Current Location</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-      >
-        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-          <View style={styles.content}>
-            <View style={styles.header}>
-              <Ionicons name="location" size={48} color={COLORS.primary} />
-              <Text style={styles.title}>Set Your Location</Text>
-              <Text style={styles.subtitle}>
-                Join local Sanatan communities based on your area
-              </Text>
-            </View>
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <View style={styles.content}>
+          {/* Header */}
+          <View style={styles.header}>
+            <Ionicons name="location" size={48} color={COLORS.primary} />
+            <Text style={styles.title}>Set Your Locations</Text>
+            <Text style={styles.subtitle}>
+              We'll auto-detect your location and add you to local Sanatan communities
+            </Text>
+          </View>
 
-            {/* Country (fixed) */}
-            <View style={styles.fieldContainer}>
-              <Text style={styles.label}>Country</Text>
-              <View style={styles.fixedField}>
-                <Ionicons name="flag" size={20} color={COLORS.primary} />
-                <Text style={styles.fixedText}>{country}</Text>
-              </View>
-            </View>
-
-            {/* State Selection */}
-            <View style={styles.fieldContainer}>
-              <Text style={styles.label}>State</Text>
-              <TouchableOpacity
-                style={styles.selectField}
-                onPress={() => setShowStates(!showStates)}
-              >
-                <Text style={[styles.selectText, !state && styles.placeholder]}>
-                  {state || 'Select your state'}
-                </Text>
-                <Ionicons name={showStates ? 'chevron-up' : 'chevron-down'} size={20} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-
-              {showStates && (
-                <ScrollView style={styles.dropdown} nestedScrollEnabled>
-                  {INDIA_STATES.map((s) => (
-                    <TouchableOpacity
-                      key={s}
-                      style={[styles.dropdownItem, state === s && styles.dropdownItemSelected]}
-                      onPress={() => {
-                        setState(s);
-                        setShowStates(false);
-                      }}
-                    >
-                      <Text style={[styles.dropdownText, state === s && styles.dropdownTextSelected]}>{s}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+          {/* Step Indicator */}
+          <View style={styles.stepIndicator}>
+            <View style={[styles.stepDot, step !== 'home' && styles.stepDotComplete]}>
+              {step !== 'home' ? (
+                <Ionicons name="checkmark" size={14} color={COLORS.textWhite} />
+              ) : (
+                <Text style={styles.stepNumber}>1</Text>
               )}
             </View>
-
-            {/* City Input */}
-            <Input
-              label="City"
-              placeholder="Enter your city (e.g., Mumbai)"
-              value={city}
-              onChangeText={setCity}
-            />
-
-            {/* Area Input */}
-            <Input
-              label="Area / Locality"
-              placeholder="Enter your area (e.g., Borivali)"
-              value={area}
-              onChangeText={setArea}
-            />
-
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-
-            <View style={styles.infoBox}>
-              <Ionicons name="information-circle" size={20} color={COLORS.info} />
-              <Text style={styles.infoText}>
-                You'll automatically join communities for your area, city, state, and country.
-              </Text>
+            <View style={[styles.stepLine, step !== 'home' && styles.stepLineComplete]} />
+            <View style={[styles.stepDot, step === 'done' && styles.stepDotComplete]}>
+              {step === 'done' ? (
+                <Ionicons name="checkmark" size={14} color={COLORS.textWhite} />
+              ) : (
+                <Text style={styles.stepNumber}>2</Text>
+              )}
             </View>
+          </View>
 
+          {/* Home Location */}
+          {renderLocationCard(
+            'Home Location',
+            homeLocation,
+            detectingHome,
+            () => detectCurrentLocation('home'),
+            'home',
+            COLORS.success
+          )}
+
+          {/* Office Location - Show after home is set */}
+          {step !== 'home' && (
+            <>
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>Optional</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              {renderLocationCard(
+                'Office Location',
+                officeLocation,
+                detectingOffice,
+                () => detectCurrentLocation('office'),
+                'business',
+                COLORS.info
+              )}
+
+              {!officeLocation && step === 'office' && (
+                <TouchableOpacity style={styles.skipButton} onPress={handleSkipOffice}>
+                  <Text style={styles.skipText}>Skip Office Location</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+
+          {/* Info Box */}
+          <View style={styles.infoBox}>
+            <Ionicons name="information-circle" size={20} color={COLORS.info} />
+            <Text style={styles.infoText}>
+              You'll be added to communities for both locations. This means you can connect with people near your home AND office!
+            </Text>
+          </View>
+
+          {/* Submit Button */}
+          {(homeLocation && step === 'done') || (homeLocation && officeLocation) ? (
             <Button
-              title="Join Communities"
-              onPress={handleSetupLocation}
+              title={`Join ${officeLocation ? 'Communities' : 'Home Communities'}`}
+              onPress={handleSetupLocations}
               loading={loading}
-              disabled={!state || !city.trim() || !area.trim()}
               style={styles.button}
             />
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+          ) : null}
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -146,9 +277,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
-  },
-  keyboardView: {
-    flex: 1,
   },
   scrollView: {
     flex: 1,
@@ -159,7 +287,7 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginBottom: SPACING.xl * 2,
+    marginBottom: SPACING.xl,
   },
   title: {
     fontSize: 28,
@@ -172,84 +300,153 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     textAlign: 'center',
+    lineHeight: 20,
   },
-  fieldContainer: {
+  stepIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.xl,
+  },
+  stepDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stepDotComplete: {
+    backgroundColor: COLORS.success,
+  },
+  stepNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  stepLine: {
+    width: 60,
+    height: 2,
+    backgroundColor: COLORS.border,
+  },
+  stepLineComplete: {
+    backgroundColor: COLORS.success,
+  },
+  locationCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.lg,
     marginBottom: SPACING.md,
   },
-  label: {
-    fontSize: 14,
+  locationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+  },
+  locationIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: BORDER_RADIUS.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.md,
+  },
+  locationTitle: {
+    fontSize: 18,
     fontWeight: '600',
     color: COLORS.text,
-    marginBottom: SPACING.xs,
   },
-  fixedField: {
+  locationDetails: {
+    paddingLeft: 52,
+  },
+  locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.card,
-    borderRadius: BORDER_RADIUS.md,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm + 4,
+    marginBottom: 4,
   },
-  fixedText: {
-    marginLeft: SPACING.sm,
-    fontSize: 16,
+  areaText: {
+    fontSize: 18,
+    fontWeight: '600',
     color: COLORS.text,
-    fontWeight: '500',
+    marginLeft: SPACING.xs,
   },
-  selectField: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: BORDER_RADIUS.md,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm + 4,
+  addressText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: 2,
   },
-  selectText: {
-    fontSize: 16,
-    color: COLORS.text,
-  },
-  placeholder: {
+  countryText: {
+    fontSize: 13,
     color: COLORS.textLight,
   },
-  dropdown: {
-    maxHeight: 200,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: BORDER_RADIUS.md,
-    marginTop: SPACING.xs,
+  changeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: SPACING.md,
   },
-  dropdownItem: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm + 2,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.divider,
-  },
-  dropdownItemSelected: {
-    backgroundColor: `${COLORS.primary}15`,
-  },
-  dropdownText: {
+  changeText: {
     fontSize: 14,
-    color: COLORS.text,
-  },
-  dropdownTextSelected: {
     color: COLORS.primary,
-    fontWeight: '600',
+    marginLeft: SPACING.xs,
+  },
+  detectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: `${COLORS.primary}10`,
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    borderStyle: 'dashed',
+  },
+  detectText: {
+    fontSize: 16,
+    color: COLORS.primary,
+    fontWeight: '500',
+    marginLeft: SPACING.sm,
+  },
+  detectingText: {
+    fontSize: 14,
+    color: COLORS.primary,
+    marginLeft: SPACING.sm,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: SPACING.lg,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  dividerText: {
+    marginHorizontal: SPACING.md,
+    fontSize: 12,
+    color: COLORS.textLight,
+    fontWeight: '500',
+  },
+  skipButton: {
+    alignItems: 'center',
+    paddingVertical: SPACING.sm,
+  },
+  skipText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textDecorationLine: 'underline',
   },
   error: {
     color: COLORS.error,
     textAlign: 'center',
-    marginBottom: SPACING.md,
+    marginVertical: SPACING.md,
   },
   infoBox: {
     flexDirection: 'row',
     backgroundColor: `${COLORS.info}15`,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
-    marginBottom: SPACING.lg,
+    marginVertical: SPACING.lg,
   },
   infoText: {
     flex: 1,

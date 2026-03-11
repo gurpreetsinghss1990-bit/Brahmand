@@ -12,7 +12,9 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Upload profile photo to your account",
-        "NSCameraUsageDescription": "Take photos for profile and messages"
+        "NSCameraUsageDescription": "Take photos for profile and messages",
+        "NSLocationWhenInUseUsageDescription": "Detect your location to join local communities",
+        "NSLocationAlwaysUsageDescription": "Detect your location to join local communities"
       }
     },
     "android": {
@@ -24,7 +26,9 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -47,6 +51,12 @@
         "expo-image-picker",
         {
           "photosPermission": "Allow Sanatan Lok to access your photos for profile and sharing."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Sanatan Lok to use your location to join local communities."
         }
       ]
     ],
