@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Keyboard
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { sendDirectMessage, getConversations } from '../../src/services/api';
+import { sendDirectMessage, getConversations, getDirectMessages } from '../../src/services/api';
 import { subscribeToMessages, ChatMessage } from '../../src/services/firebase/chatService';
 import { useAuthStore } from '../../src/store/authStore';
 import { Conversation } from '../../src/types';
@@ -36,36 +36,94 @@ export default function DirectMessageScreen() {
     }
   }, [conversationId]);
 
+  // Fetch messages via REST API (fallback)
+  const fetchMessagesViaAPI = useCallback(async () => {
+    try {
+      console.log('[Chat] Fetching messages via REST API');
+      const response = await getDirectMessages(conversationId!);
+      const apiMessages = response.data.map((msg: any) => ({
+        id: msg.id,
+        sender_id: msg.sender_id || '',
+        sender_name: msg.sender_name || 'Unknown',
+        sender_photo: msg.sender_photo,
+        text: msg.text || msg.content || '',
+        content: msg.content || msg.text || '',
+        created_at: msg.created_at || msg.timestamp || '',
+        timestamp: msg.timestamp || msg.created_at || '',
+      }));
+      setMessages(apiMessages);
+      setLoading(false);
+      setIsRealtime(false);
+      
+      // Auto-scroll
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    } catch (error) {
+      console.error('[Chat] Error fetching messages via API:', error);
+      setLoading(false);
+    }
+  }, [conversationId]);
+
   useEffect(() => {
     // Fetch conversation details
     fetchConversation();
     
+    let unsubscribe: (() => void) | null = null;
+    let fallbackTimeout: NodeJS.Timeout | null = null;
+    
     // Set up real-time Firestore listener for messages
     // Path: chats/{chatId}/messages
-    const unsubscribe = subscribeToMessages(
-      conversationId!,
-      (updatedMessages) => {
-        setMessages(updatedMessages);
-        setLoading(false);
-        setIsRealtime(true);
-        
-        // Auto-scroll to bottom when new message arrives
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-      },
-      (error) => {
-        console.error('Real-time listener error:', error);
-        setLoading(false);
+    try {
+      unsubscribe = subscribeToMessages(
+        conversationId!,
+        (updatedMessages) => {
+          console.log('[Chat] Real-time update received:', updatedMessages.length, 'messages');
+          setMessages(updatedMessages);
+          setLoading(false);
+          setIsRealtime(true);
+          
+          // Clear fallback timeout if real-time is working
+          if (fallbackTimeout) {
+            clearTimeout(fallbackTimeout);
+            fallbackTimeout = null;
+          }
+          
+          // Auto-scroll to bottom when new message arrives
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 100);
+        },
+        (error) => {
+          console.error('[Chat] Real-time listener error:', error);
+          // Fall back to REST API
+          fetchMessagesViaAPI();
+        }
+      );
+    } catch (error) {
+      console.error('[Chat] Failed to set up real-time listener:', error);
+      fetchMessagesViaAPI();
+    }
+    
+    // Fallback: If no real-time update received within 3 seconds, use REST API
+    fallbackTimeout = setTimeout(() => {
+      if (loading) {
+        console.log('[Chat] Real-time timeout, falling back to REST API');
+        fetchMessagesViaAPI();
       }
-    );
+    }, 3000);
 
     // Cleanup: unsubscribe from Firestore listener when leaving screen
     return () => {
-      console.log('Unsubscribing from chat:', conversationId);
-      unsubscribe();
+      console.log('[Chat] Unsubscribing from chat:', conversationId);
+      if (unsubscribe) {
+        unsubscribe();
+      }
+      if (fallbackTimeout) {
+        clearTimeout(fallbackTimeout);
+      }
     };
-  }, [conversationId, fetchConversation]);
+  }, [conversationId, fetchConversation, fetchMessagesViaAPI, loading]);
 
   const handleSend = async () => {
     if (!newMessage.trim() || !conversation) return;
@@ -76,8 +134,10 @@ export default function DirectMessageScreen() {
     
     try {
       await sendDirectMessage(conversation.user.sl_id, messageText);
-      // Message will appear automatically via Firestore real-time listener
-      // No need to manually update state or refetch
+      // If not real-time, fetch messages after sending
+      if (!isRealtime) {
+        setTimeout(() => fetchMessagesViaAPI(), 500);
+      }
     } catch (error: any) {
       // Restore the message if sending failed
       setNewMessage(messageText);
