@@ -875,8 +875,8 @@ async def send_community_message(
     db = await get_db()
     user = await db.get_document('users', token_data["user_id"])
     
-    if not user.get('is_verified'):
-        raise HTTPException(status_code=403, detail="Only verified members can post")
+    # All users can post in community chats - no KYC/verification required
+    # KYC is only needed for temple admins, vendors, and organizers
     
     is_ok, reason = moderate_content(message.content)
     if not is_ok:

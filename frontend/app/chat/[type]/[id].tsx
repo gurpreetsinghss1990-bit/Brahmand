@@ -32,9 +32,8 @@ export default function ChatScreen() {
       let response;
       if (type === 'community') {
         response = await getCommunityMessages(id!, subgroup);
-        // Check verification status for community chats
-        const verificationRes = await getVerificationStatus();
-        setIsVerified(verificationRes.data.is_verified);
+        // All users can post in community chats - no KYC required
+        setIsVerified(true);
       } else {
         response = await getCircleMessages(id!);
         setIsVerified(true); // Circles don't require verification
