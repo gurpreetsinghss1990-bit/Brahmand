@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Users collection - readable by all, writable by backend only
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if false; // Backend (Admin SDK) only
+    }
+    
+    // Chats collection - Private messaging
+    match /chats/{chatId} {
+      // Allow read for any authenticated request or public read
+      // The backend validates user membership
+      allow read: if true;
+      allow write: if false; // Backend (Admin SDK) only
+      
+      // Messages subcollection - Real-time readable
+      match /messages/{messageId} {
+        // Allow read for real-time listeners
+        allow read: if true;
+        // Only backend can write
+        allow write: if false;
+      }
+    }
+    
+    // Communities collection
+    match /communities/{communityId} {
+      allow read: if true;
+      allow write: if false;
+      
+      // Community messages
+      match /messages/{messageId} {
+        allow read: if true;
+        allow write: if false;
+      }
+    }
+    
+    // OTP collection - backend only
+    match /otp_codes/{otpId} {
+      allow read, write: if false;
+    }
+    
+    // Default deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
