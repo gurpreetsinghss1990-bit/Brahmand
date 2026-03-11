@@ -3,10 +3,10 @@ import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Keyboard
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getDirectMessages, sendDirectMessage, getConversations } from '../../src/services/api';
-import { socketService } from '../../src/services/socket';
+import { sendDirectMessage, getConversations } from '../../src/services/api';
+import { subscribeToMessages, ChatMessage } from '../../src/services/firebase/chatService';
 import { useAuthStore } from '../../src/store/authStore';
-import { Message, Conversation } from '../../src/types';
+import { Conversation } from '../../src/types';
 import { Avatar } from '../../src/components/Avatar';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 
@@ -16,60 +16,71 @@ export default function DirectMessageScreen() {
   const { user } = useAuthStore();
   const flatListRef = useRef<FlatList>(null);
 
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [isRealtime, setIsRealtime] = useState(false);
 
-  const fetchData = useCallback(async () => {
+  // Fetch conversation details (only once)
+  const fetchConversation = useCallback(async () => {
     try {
-      // Fetch messages
-      const msgResponse = await getDirectMessages(conversationId!);
-      setMessages(msgResponse.data);
-
-      // Fetch conversation details
       const convResponse = await getConversations();
       const conv = convResponse.data.find((c: Conversation) => 
         c.conversation_id === conversationId || c.chat_id === conversationId
       );
       if (conv) setConversation(conv);
     } catch (error) {
-      console.error('Error fetching DM:', error);
-    } finally {
-      setLoading(false);
+      console.error('Error fetching conversation:', error);
     }
   }, [conversationId]);
 
   useEffect(() => {
-    fetchData();
+    // Fetch conversation details
+    fetchConversation();
     
-    // Connect socket and join room
-    socketService.connect();
-    const room = `dm_${conversationId}`;
-    socketService.joinRoom(room);
-    
-    // Listen for new messages
-    socketService.onMessage(`dm_${conversationId}`, (message) => {
-      setMessages((prev) => [...prev, message]);
-    });
+    // Set up real-time Firestore listener for messages
+    // Path: chats/{chatId}/messages
+    const unsubscribe = subscribeToMessages(
+      conversationId!,
+      (updatedMessages) => {
+        setMessages(updatedMessages);
+        setLoading(false);
+        setIsRealtime(true);
+        
+        // Auto-scroll to bottom when new message arrives
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      },
+      (error) => {
+        console.error('Real-time listener error:', error);
+        setLoading(false);
+      }
+    );
 
+    // Cleanup: unsubscribe from Firestore listener when leaving screen
     return () => {
-      socketService.leaveRoom(room);
-      socketService.offMessage(`dm_${conversationId}`);
+      console.log('Unsubscribing from chat:', conversationId);
+      unsubscribe();
     };
-  }, [conversationId, fetchData]);
+  }, [conversationId, fetchConversation]);
 
   const handleSend = async () => {
     if (!newMessage.trim() || !conversation) return;
 
+    const messageText = newMessage.trim();
+    setNewMessage(''); // Clear input immediately for better UX
     setSending(true);
+    
     try {
-      await sendDirectMessage(conversation.user.sl_id, newMessage.trim());
-      setNewMessage('');
-      // Message will be added via socket or refetch
-      fetchData();
+      await sendDirectMessage(conversation.user.sl_id, messageText);
+      // Message will appear automatically via Firestore real-time listener
+      // No need to manually update state or refetch
     } catch (error: any) {
+      // Restore the message if sending failed
+      setNewMessage(messageText);
       alert(error.response?.data?.detail || 'Failed to send message');
     } finally {
       setSending(false);
@@ -77,11 +88,12 @@ export default function DirectMessageScreen() {
   };
 
   const formatTime = (dateString: string) => {
+    if (!dateString) return '';
     const date = new Date(dateString);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  const renderMessage = ({ item }: { item: Message }) => {
+  const renderMessage = ({ item }: { item: ChatMessage }) => {
     const isOwnMessage = item.sender_id === user?.id;
 
     return (
@@ -91,7 +103,7 @@ export default function DirectMessageScreen() {
         )}
         <View style={[styles.messageBubble, isOwnMessage && styles.ownMessageBubble]}>
           <Text style={[styles.messageText, isOwnMessage && styles.ownMessageText]}>
-            {item.content}
+            {item.text || item.content}
           </Text>
           <Text style={[styles.timeText, isOwnMessage && styles.ownTimeText]}>
             {formatTime(item.created_at)}
@@ -105,6 +117,7 @@ export default function DirectMessageScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Connecting to chat...</Text>
       </View>
     );
   }
@@ -121,7 +134,15 @@ export default function DirectMessageScreen() {
             <Avatar name={conversation.user.name} photo={conversation.user.photo} size={40} />
             <View style={styles.headerInfo}>
               <Text style={styles.headerTitle}>{conversation.user.name}</Text>
-              <Text style={styles.headerSubtitle}>{conversation.user.sl_id}</Text>
+              <View style={styles.statusRow}>
+                <Text style={styles.headerSubtitle}>{conversation.user.sl_id}</Text>
+                {isRealtime && (
+                  <View style={styles.realtimeBadge}>
+                    <View style={styles.realtimeDot} />
+                    <Text style={styles.realtimeText}>Live</Text>
+                  </View>
+                )}
+              </View>
             </View>
           </>
         )}
@@ -144,6 +165,7 @@ export default function DirectMessageScreen() {
             <View style={styles.emptyContainer}>
               <Ionicons name="chatbubble-outline" size={48} color={COLORS.textLight} />
               <Text style={styles.emptyText}>Start your conversation</Text>
+              <Text style={styles.emptySubtext}>Messages will appear in real-time</Text>
             </View>
           }
         />
@@ -187,6 +209,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.background,
   },
+  loadingText: {
+    marginTop: SPACING.md,
+    fontSize: 14,
+    color: COLORS.textSecondary,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -207,9 +234,35 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.text,
   },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
   headerSubtitle: {
     fontSize: 12,
     color: COLORS.primary,
+  },
+  realtimeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: SPACING.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: '#E8F5E9',
+    borderRadius: 8,
+  },
+  realtimeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#4CAF50',
+    marginRight: 4,
+  },
+  realtimeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#4CAF50',
   },
   chatContainer: {
     flex: 1,
@@ -265,8 +318,14 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     marginTop: SPACING.md,
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: '500',
     color: COLORS.textSecondary,
+  },
+  emptySubtext: {
+    marginTop: SPACING.xs,
+    fontSize: 12,
+    color: COLORS.textLight,
   },
   inputContainer: {
     flexDirection: 'row',

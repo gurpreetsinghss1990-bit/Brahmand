@@ -251,6 +251,9 @@ backend:
       - working: true
         agent: "testing"
         comment: "Comprehensive Direct Messaging testing completed successfully. All 9 test cases passed (100% success rate). Full flow tested: User creation with OTP+registration, user search by SL-ID, first DM creation, conversation listing for both users, reply DM using existing chat (not creating new one), and message retrieval. Chat ID format correct (private_*). Deterministic chat creation working - second message uses same chat_id. Messages retrieved in correct chronological order."
+      - working: true
+        agent: "main"
+        comment: "Implemented real-time messaging using Firestore onSnapshot() listener. Frontend subscribes to chats/{chatId}/messages subcollection. Messages appear instantly for both sender and receiver without page refresh. Added 'Live' indicator badge in chat header."
 
   - task: "Health & Status Endpoints"
     implemented: true
