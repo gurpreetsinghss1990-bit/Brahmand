@@ -70,7 +70,11 @@ export default function DirectMessageScreen() {
     fetchConversation();
     
     let unsubscribe: (() => void) | null = null;
-    let fallbackTimeout: NodeJS.Timeout | null = null;
+    let pollingInterval: NodeJS.Timeout | null = null;
+    let realtimeWorking = false;
+    
+    // First, fetch messages via REST API immediately
+    fetchMessagesViaAPI();
     
     // Set up real-time Firestore listener for messages
     // Path: chats/{chatId}/messages
@@ -82,11 +86,12 @@ export default function DirectMessageScreen() {
           setMessages(updatedMessages);
           setLoading(false);
           setIsRealtime(true);
+          realtimeWorking = true;
           
-          // Clear fallback timeout if real-time is working
-          if (fallbackTimeout) {
-            clearTimeout(fallbackTimeout);
-            fallbackTimeout = null;
+          // Stop polling if real-time works
+          if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
           }
           
           // Auto-scroll to bottom when new message arrives
@@ -96,34 +101,40 @@ export default function DirectMessageScreen() {
         },
         (error) => {
           console.error('[Chat] Real-time listener error:', error);
-          // Fall back to REST API
-          fetchMessagesViaAPI();
+          // Start polling if real-time fails
+          if (!pollingInterval) {
+            console.log('[Chat] Starting polling fallback');
+            pollingInterval = setInterval(() => {
+              fetchMessagesViaAPI();
+            }, 2000);
+          }
         }
       );
     } catch (error) {
       console.error('[Chat] Failed to set up real-time listener:', error);
-      fetchMessagesViaAPI();
     }
     
-    // Fallback: If no real-time update received within 3 seconds, use REST API
-    fallbackTimeout = setTimeout(() => {
-      if (loading) {
-        console.log('[Chat] Real-time timeout, falling back to REST API');
-        fetchMessagesViaAPI();
+    // Start polling as backup after 3 seconds if real-time hasn't kicked in
+    setTimeout(() => {
+      if (!realtimeWorking && !pollingInterval) {
+        console.log('[Chat] Starting polling (real-time not responding)');
+        pollingInterval = setInterval(() => {
+          fetchMessagesViaAPI();
+        }, 2000);
       }
     }, 3000);
 
     // Cleanup: unsubscribe from Firestore listener when leaving screen
     return () => {
-      console.log('[Chat] Unsubscribing from chat:', conversationId);
+      console.log('[Chat] Cleanup: unsubscribing from chat:', conversationId);
       if (unsubscribe) {
         unsubscribe();
       }
-      if (fallbackTimeout) {
-        clearTimeout(fallbackTimeout);
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
       }
     };
-  }, [conversationId, fetchConversation, fetchMessagesViaAPI, loading]);
+  }, [conversationId, fetchConversation, fetchMessagesViaAPI]);
 
   const handleSend = async () => {
     if (!newMessage.trim() || !conversation) return;
@@ -134,10 +145,9 @@ export default function DirectMessageScreen() {
     
     try {
       await sendDirectMessage(conversation.user.sl_id, messageText);
-      // If not real-time, fetch messages after sending
-      if (!isRealtime) {
-        setTimeout(() => fetchMessagesViaAPI(), 500);
-      }
+      // Always fetch after sending to ensure message appears
+      // Real-time listener will also pick it up if working
+      setTimeout(() => fetchMessagesViaAPI(), 300);
     } catch (error: any) {
       // Restore the message if sending failed
       setNewMessage(messageText);
