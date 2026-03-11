@@ -9,7 +9,8 @@ import {
   Platform, 
   ActivityIndicator,
   Keyboard,
-  Dimensions
+  Dimensions,
+  KeyboardAvoidingView
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +38,7 @@ export default function DirectMessageScreen() {
   const [isRealtime, setIsRealtime] = useState(false);
   const [viewHeight, setViewHeight] = useState(Dimensions.get('window').height);
   const [hasMarkedRead, setHasMarkedRead] = useState(false);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
 
   // Mark messages as read when opening chat
   const markMessagesAsRead = useCallback(async () => {
@@ -54,31 +56,61 @@ export default function DirectMessageScreen() {
   // Handle viewport resize for iOS Safari keyboard
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      // iOS Safari specific viewport handling
+      const handleViewportResize = () => {
+        if (window.visualViewport) {
+          const newHeight = window.visualViewport.height;
+          const offset = window.innerHeight - newHeight;
+          setViewHeight(newHeight);
+          setKeyboardOffset(offset > 50 ? offset : 0);
+          // Scroll to bottom when keyboard opens
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+        }
+      };
+
       const handleResize = () => {
-        const height = window.visualViewport?.height || window.innerHeight;
-        setViewHeight(height);
+        if (window.visualViewport) {
+          setViewHeight(window.visualViewport.height);
+        } else {
+          setViewHeight(window.innerHeight);
+        }
         setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
       };
 
+      // Initial setup
       handleResize();
       
+      // Listen to visual viewport changes (iOS Safari)
       if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', handleResize);
+        window.visualViewport.addEventListener('resize', handleViewportResize);
+        window.visualViewport.addEventListener('scroll', handleViewportResize);
       }
       window.addEventListener('resize', handleResize);
 
       return () => {
         if (window.visualViewport) {
-          window.visualViewport.removeEventListener('resize', handleResize);
+          window.visualViewport.removeEventListener('resize', handleViewportResize);
+          window.visualViewport.removeEventListener('scroll', handleViewportResize);
         }
         window.removeEventListener('resize', handleResize);
       };
     } else {
-      const sub = Keyboard.addListener(
+      // Native keyboard handling
+      const showSub = Keyboard.addListener(
         Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-        () => setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100)
+        (e) => {
+          setKeyboardOffset(e.endCoordinates.height);
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+        }
       );
-      return () => sub.remove();
+      const hideSub = Keyboard.addListener(
+        Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+        () => setKeyboardOffset(0)
+      );
+      return () => {
+        showSub.remove();
+        hideSub.remove();
+      };
     }
   }, []);
 
@@ -247,11 +279,13 @@ export default function DirectMessageScreen() {
 
   const bottomPadding = Platform.OS === 'web' ? 8 : Math.max(insets.bottom, 8);
 
-  return (
-    <View style={[
-      styles.container,
-      Platform.OS === 'web' && { height: viewHeight }
-    ]}>
+  // Calculate container style based on platform
+  const containerStyle = Platform.OS === 'web' 
+    ? [styles.container, { height: viewHeight, maxHeight: viewHeight }]
+    : styles.container;
+
+  const renderContent = () => (
+    <>
       {/* Safe area top */}
       <View style={{ height: insets.top, backgroundColor: COLORS.surface }} />
       
@@ -322,7 +356,27 @@ export default function DirectMessageScreen() {
           )}
         </TouchableOpacity>
       </View>
-    </View>
+    </>
+  );
+
+  // For web, use direct height-controlled container
+  if (Platform.OS === 'web') {
+    return (
+      <View style={containerStyle}>
+        {renderContent()}
+      </View>
+    );
+  }
+
+  // For native, use KeyboardAvoidingView
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={0}
+    >
+      {renderContent()}
+    </KeyboardAvoidingView>
   );
 }
 
@@ -332,6 +386,14 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     display: 'flex',
     flexDirection: 'column',
+    ...(Platform.OS === 'web' ? {
+      position: 'absolute' as any,
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      overflow: 'hidden',
+    } : {}),
   },
   loadingContainer: {
     flex: 1,

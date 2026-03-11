@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Input } from '../../src/components/Input';
 import { Button } from '../../src/components/Button';
 import { sendOTP } from '../../src/services/api';
+import { sendFirebaseOTP } from '../../src/services/firebase/authService';
 import { COLORS, SPACING } from '../../src/constants/theme';
 
 export default function PhoneScreen() {
@@ -24,10 +25,23 @@ export default function PhoneScreen() {
     setError('');
 
     try {
-      await sendOTP(phone);
-      router.push({ pathname: '/auth/otp', params: { phone } });
+      const formattedPhone = `+91${phone}`;
+      
+      // Send OTP via Firebase
+      await sendFirebaseOTP(formattedPhone);
+      
+      // Also notify backend for tracking
+      try {
+        await sendOTP(formattedPhone);
+      } catch (e) {
+        // Backend tracking is optional
+        console.log('[Phone] Backend notification failed (non-critical)');
+      }
+      
+      router.push({ pathname: '/auth/otp', params: { phone: formattedPhone } });
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to send OTP. Please try again.');
+      console.error('[Phone] OTP error:', err);
+      setError(err.message || 'Failed to send OTP. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -48,7 +62,7 @@ export default function PhoneScreen() {
             <Ionicons name="phone-portrait" size={48} color={COLORS.primary} />
             <Text style={styles.title}>Enter Your Phone Number</Text>
             <Text style={styles.subtitle}>
-              We'll send you a verification code to confirm your identity
+              We'll send you a verification code via SMS
             </Text>
           </View>
 
@@ -73,17 +87,20 @@ export default function PhoneScreen() {
             </View>
 
             <Button
-              title="Send OTP"
+              title={loading ? "Sending OTP..." : "Send OTP"}
               onPress={handleSendOTP}
               loading={loading}
-              disabled={phone.length < 10}
+              disabled={phone.length < 10 || loading}
             />
 
-            <Text style={styles.mockNote}>
-              For testing: Use any phone number. OTP is always 123456
+            <Text style={styles.infoNote}>
+              A 6-digit verification code will be sent to your phone
             </Text>
           </View>
         </View>
+        
+        {/* reCAPTCHA container for web */}
+        {Platform.OS === 'web' && <View nativeID="recaptcha-container" />}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -144,11 +161,10 @@ const styles = StyleSheet.create({
   phoneInput: {
     flex: 1,
   },
-  mockNote: {
+  infoNote: {
     marginTop: SPACING.lg,
     fontSize: 12,
-    color: COLORS.textLight,
+    color: COLORS.textSecondary,
     textAlign: 'center',
-    fontStyle: 'italic',
   },
 });

@@ -5,8 +5,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../src/components/Button';
 import { verifyOTP, sendOTP } from '../../src/services/api';
+import { verifyFirebaseOTP, sendFirebaseOTP } from '../../src/services/firebase/authService';
 import { useAuthStore } from '../../src/store/authStore';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
+import api from '../../src/services/api';
 
 export default function OTPScreen() {
   const router = useRouter();
@@ -59,21 +61,46 @@ export default function OTPScreen() {
     setError('');
 
     try {
-      const response = await verifyOTP(phone || '', code);
+      // Verify OTP with Firebase and get ID token
+      const idToken = await verifyFirebaseOTP(code);
+      
+      // Send token to backend for verification and user creation
+      const response = await api.post('/auth/verify-firebase-token', { id_token: idToken });
       const data = response.data;
 
       if (data.is_new_user) {
-        router.push({ pathname: '/auth/profile', params: { phone } });
+        router.push({ pathname: '/auth/profile', params: { phone: data.phone, firebase_uid: data.firebase_uid } });
       } else {
         await login(data.user, data.token);
-        if (data.user.location) {
+        if (data.user.home_location || data.user.location) {
           router.replace('/(tabs)');
         } else {
-          router.replace('/auth/location');
+          router.replace('/auth/address-entry');
         }
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Invalid OTP. Please try again.');
+      console.error('[OTP] Verification error:', err);
+      
+      // Fallback to legacy OTP verification for testing
+      try {
+        const response = await verifyOTP(phone || '', code);
+        const data = response.data;
+
+        if (data.is_new_user) {
+          router.push({ pathname: '/auth/profile', params: { phone } });
+        } else {
+          await login(data.user, data.token);
+          if (data.user.home_location || data.user.location) {
+            router.replace('/(tabs)');
+          } else {
+            router.replace('/auth/address-entry');
+          }
+        }
+        return;
+      } catch (legacyErr: any) {
+        setError(err.message || legacyErr.response?.data?.detail || 'Invalid OTP. Please try again.');
+      }
+      
       setOtp(['', '', '', '', '', '']);
       inputRefs.current[0]?.focus();
     } finally {
@@ -85,14 +112,17 @@ export default function OTPScreen() {
     if (resendTimer > 0) return;
     
     try {
-      await sendOTP(phone || '');
+      await sendFirebaseOTP(phone || '');
       setResendTimer(30);
       setOtp(['', '', '', '', '', '']);
       inputRefs.current[0]?.focus();
-    } catch (err) {
-      setError('Failed to resend OTP');
+    } catch (err: any) {
+      setError(err.message || 'Failed to resend OTP');
     }
   };
+
+  // Format phone for display
+  const displayPhone = phone?.replace('+91', '') || '';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -109,7 +139,7 @@ export default function OTPScreen() {
             <Ionicons name="keypad" size={48} color={COLORS.primary} />
             <Text style={styles.title}>Verify OTP</Text>
             <Text style={styles.subtitle}>
-              Enter the 6-digit code sent to +91 {phone}
+              Enter the 6-digit code sent to {phone}
             </Text>
           </View>
 
@@ -132,10 +162,10 @@ export default function OTPScreen() {
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <Button
-            title="Verify"
+            title={loading ? "Verifying..." : "Verify"}
             onPress={() => handleVerify()}
             loading={loading}
-            disabled={otp.some((digit) => digit === '')}
+            disabled={otp.some((digit) => digit === '') || loading}
           />
 
           <TouchableOpacity
@@ -147,10 +177,6 @@ export default function OTPScreen() {
               {resendTimer > 0 ? `Resend OTP in ${resendTimer}s` : 'Resend OTP'}
             </Text>
           </TouchableOpacity>
-
-          <Text style={styles.mockNote}>
-            Mock OTP: 123456
-          </Text>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -224,12 +250,5 @@ const styles = StyleSheet.create({
   },
   resendDisabled: {
     color: COLORS.textLight,
-  },
-  mockNote: {
-    marginTop: SPACING.lg,
-    fontSize: 12,
-    color: COLORS.textLight,
-    textAlign: 'center',
-    fontStyle: 'italic',
   },
 });

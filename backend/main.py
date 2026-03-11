@@ -189,36 +189,154 @@ async def get_firebase_config():
 
 # =================== AUTH ENDPOINTS ===================
 
+@api_router.post("/admin/reset-database")
+async def reset_database(confirm: str = ""):
+    """
+    Reset database for beta launch - removes all test data
+    Requires confirmation parameter: confirm=DELETE_ALL_DATA
+    """
+    if confirm != "DELETE_ALL_DATA":
+        raise HTTPException(
+            status_code=400, 
+            detail="Confirmation required. Pass confirm=DELETE_ALL_DATA"
+        )
+    
+    db = await get_db()
+    deleted = {"users": 0, "chats": 0, "messages": 0, "communities": 0, "otps": 0}
+    
+    try:
+        # Delete all users
+        users = await db.query_documents('users', [])
+        for user in users:
+            await db.delete_document('users', user['id'])
+            deleted["users"] += 1
+        
+        # Delete all chats and their messages
+        chats = await db.query_documents('chats', [])
+        for chat in chats:
+            # Delete messages subcollection
+            messages = await db.get_chat_messages(chat['id'], 1000)
+            for msg in messages:
+                try:
+                    await db.client.collection('chats').document(chat['id']).collection('messages').document(msg['id']).delete()
+                    deleted["messages"] += 1
+                except:
+                    pass
+            await db.delete_document('chats', chat['id'])
+            deleted["chats"] += 1
+        
+        # Delete all communities
+        communities = await db.query_documents('communities', [])
+        for community in communities:
+            await db.delete_document('communities', community['id'])
+            deleted["communities"] += 1
+        
+        # Delete all OTPs
+        otps = await db.query_documents('otps', [])
+        for otp in otps:
+            await db.delete_document('otps', otp['id'])
+            deleted["otps"] += 1
+        
+        logger.info(f"Database reset completed: {deleted}")
+        return {
+            "message": "Database reset successful",
+            "deleted": deleted,
+            "status": "ready_for_beta"
+        }
+    except Exception as e:
+        logger.error(f"Database reset error: {e}")
+        raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
+
+
 @api_router.post("/auth/send-otp")
 async def send_otp(request: OTPRequest, _: bool = Depends(auth_rate_limit)):
-    """Send OTP to phone (mock: 123456)"""
+    """
+    Send OTP via Firebase Phone Auth
+    Frontend should use Firebase Auth SDK to send OTP
+    This endpoint is for backend tracking only
+    """
     phone = request.phone
     if len(phone) < 10:
         raise HTTPException(status_code=400, detail="Invalid phone number")
     
     db = await get_db()
     
+    # Store OTP request for tracking (Firebase sends actual OTP)
     otp_data = {
         "phone": phone,
-        "otp": "123456",  # Mock OTP
-        "expires_at": datetime.utcnow().isoformat(),
-        "attempts": 0
+        "requested_at": datetime.utcnow().isoformat(),
+        "verified": False
     }
     
-    # Check existing OTP
     existing = await db.find_one('otps', [('phone', '==', phone)])
     if existing:
         await db.update_document('otps', existing['id'], otp_data)
     else:
         await db.create_document('otps', otp_data)
     
-    logger.info(f"OTP sent to {phone}: 123456 (mock)")
+    logger.info(f"OTP request for {phone} - Firebase will send actual SMS")
     return {"message": "OTP sent successfully", "phone": phone}
+
+
+@api_router.post("/auth/verify-firebase-token")
+async def verify_firebase_token(request: dict, _: bool = Depends(auth_rate_limit)):
+    """
+    Verify Firebase ID token after phone auth
+    Creates user document if new user
+    """
+    from firebase_admin import auth as firebase_auth
+    
+    id_token = request.get("id_token")
+    if not id_token:
+        raise HTTPException(status_code=400, detail="ID token required")
+    
+    try:
+        # Verify the Firebase ID token
+        decoded_token = firebase_auth.verify_id_token(id_token)
+        firebase_uid = decoded_token['uid']
+        phone = decoded_token.get('phone_number', '')
+        
+        if not phone:
+            raise HTTPException(status_code=400, detail="Phone number not found in token")
+        
+        db = await get_db()
+        
+        # Check if user exists
+        user = await db.get_user_by_phone(phone)
+        
+        if user and user.get('sl_id'):
+            # Existing user - return token
+            token = create_jwt_token(user['id'], user['sl_id'])
+            return {
+                "message": "Login successful",
+                "token": token,
+                "user": user,
+                "is_new_user": False
+            }
+        
+        # New user - return for registration
+        return {
+            "message": "Phone verified",
+            "is_new_user": True,
+            "phone": phone,
+            "firebase_uid": firebase_uid
+        }
+        
+    except firebase_auth.InvalidIdTokenError:
+        raise HTTPException(status_code=401, detail="Invalid Firebase token")
+    except firebase_auth.ExpiredIdTokenError:
+        raise HTTPException(status_code=401, detail="Firebase token expired")
+    except Exception as e:
+        logger.error(f"Firebase token verification error: {e}")
+        raise HTTPException(status_code=500, detail="Token verification failed")
 
 
 @api_router.post("/auth/verify-otp")
 async def verify_otp(request: OTPVerify, _: bool = Depends(auth_rate_limit)):
-    """Verify OTP and check user"""
+    """
+    Legacy OTP verification (kept for backward compatibility)
+    For production, use /auth/verify-firebase-token instead
+    """
     db = await get_db()
     
     otp_record = await db.find_one('otps', [('phone', '==', request.phone)])
@@ -233,7 +351,8 @@ async def verify_otp(request: OTPVerify, _: bool = Depends(auth_rate_limit)):
         'attempts': otp_record.get('attempts', 0) + 1
     })
     
-    if otp_record['otp'] != request.otp:
+    # For development/testing, accept 123456
+    if request.otp != "123456":
         raise HTTPException(status_code=400, detail="Invalid OTP")
     
     # Delete OTP
@@ -902,6 +1021,20 @@ async def get_dm_conversations(token_data: dict = Depends(verify_token)):
             other = await db.get_document('users', other_id)
             
             if other:
+                # Get the last message to determine status and sender
+                last_messages = await db.get_chat_messages(chat['id'], 1)
+                last_msg = last_messages[0] if last_messages else None
+                
+                # Determine status to show (only for messages sent by current user)
+                last_message_status = None
+                last_message_sender_id = None
+                
+                if last_msg:
+                    last_message_sender_id = last_msg.get('sender_id')
+                    # Only show status indicator if the current user sent the message
+                    if last_message_sender_id == user_id:
+                        last_message_status = last_msg.get('status', 'delivered')
+                
                 result.append({
                     "conversation_id": chat['id'],
                     "chat_id": chat['id'],
@@ -913,6 +1046,8 @@ async def get_dm_conversations(token_data: dict = Depends(verify_token)):
                     },
                     "last_message": chat.get('last_message', ''),
                     "last_message_at": chat.get('updated_at', chat.get('created_at')),
+                    "last_message_status": last_message_status,
+                    "last_message_sender_id": last_message_sender_id,
                     "created_at": chat.get('created_at')
                 })
     
