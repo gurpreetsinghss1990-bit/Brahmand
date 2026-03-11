@@ -55,6 +55,7 @@ export interface Message {
 
 export interface Conversation {
   conversation_id: string;
+  chat_id?: string;
   user: {
     id: string;
     sl_id: string;
@@ -63,4 +64,5 @@ export interface Conversation {
   };
   last_message: string;
   last_message_at: string;
+  created_at?: string;
 }

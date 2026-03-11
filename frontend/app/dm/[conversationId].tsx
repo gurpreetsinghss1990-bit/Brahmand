@@ -30,7 +30,9 @@ export default function DirectMessageScreen() {
 
       // Fetch conversation details
       const convResponse = await getConversations();
-      const conv = convResponse.data.find((c: Conversation) => c.conversation_id === conversationId);
+      const conv = convResponse.data.find((c: Conversation) => 
+        c.conversation_id === conversationId || c.chat_id === conversationId
+      );
       if (conv) setConversation(conv);
     } catch (error) {
       console.error('Error fetching DM:', error);

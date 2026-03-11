@@ -40,11 +40,11 @@ export default function NewDMScreen() {
 
     setSending(true);
     try {
-      await sendDirectMessage(foundUser.sl_id, message.trim());
-      router.back();
+      const response = await sendDirectMessage(foundUser.sl_id, message.trim());
+      // Navigate to the chat conversation
+      router.replace(`/dm/${response.data.chat_id}`);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to send message');
-    } finally {
       setSending(false);
     }
   };

@@ -750,8 +750,16 @@ async def get_community_messages(community_id: str, subgroup_type: str, limit: i
     return await db.get_chat_messages(chat_id, limit)
 
 
-@api_router.post("/messages/dm")
+@api_router.post("/dm")
 async def send_dm(message: DirectMessageCreate, token_data: dict = Depends(verify_token)):
+    """
+    Send a direct message. Creates private chat if it doesn't exist.
+    
+    Logic:
+    1. Check if chat exists between the two users (members array contains both)
+    2. If exists -> send message to that chat
+    3. If not exists -> create new chat document with chat_type: "private"
+    """
     db = await get_db()
     sender = await db.get_document('users', token_data["user_id"])
     recipient = await db.get_user_by_sl_id(message.recipient_sl_id)
@@ -759,46 +767,129 @@ async def send_dm(message: DirectMessageCreate, token_data: dict = Depends(verif
     if not recipient:
         raise HTTPException(status_code=404, detail="User not found")
     
-    chat_id = f"dm_{'_'.join(sorted([sender['id'], recipient['id']]))}"
+    sender_id = sender['id']
+    recipient_id = recipient['id']
     
+    # Create deterministic chat_id from sorted user IDs
+    sorted_members = sorted([sender_id, recipient_id])
+    chat_id = f"private_{'_'.join(sorted_members)}"
+    
+    # Check if chat exists
     chat = await db.get_document('chats', chat_id)
+    
     if not chat:
-        await db.client.collection('chats').document(chat_id).set({
-            'type': 'dm', 'participants': sorted([sender['id'], recipient['id']])
+        # Create new private chat document
+        chat_data = {
+            'chat_type': 'private',
+            'members': sorted_members,
+            'created_at': datetime.utcnow(),
+            'last_message': message.content[:100],  # Preview of last message
+            'updated_at': datetime.utcnow()
+        }
+        await db.set_document('chats', chat_id, chat_data)
+        logger.info(f"Created new private chat: {chat_id}")
+    else:
+        # Update chat with last message
+        await db.update_document('chats', chat_id, {
+            'last_message': message.content[:100],
+            'updated_at': datetime.utcnow()
         })
     
+    # Create message in messages subcollection
+    now = datetime.utcnow()
     msg_data = {
-        'sender_id': sender['id'],
+        'sender_id': sender_id,
         'sender_name': sender['name'],
-        'recipient_id': recipient['id'],
-        'content': message.content,
-        'created_at': datetime.utcnow()
+        'sender_photo': sender.get('photo'),
+        'text': message.content,
+        'content': message.content,  # Keep for compatibility
     }
     
     msg_id = await db.add_message_to_chat(chat_id, msg_data)
-    msg_data['id'] = msg_id
     
-    await sio.emit('new_dm', msg_data, room=chat_id)
-    return msg_data
+    # Response data (with proper timestamps for JSON)
+    response_msg = {
+        'id': msg_id,
+        'sender_id': sender_id,
+        'sender_name': sender['name'],
+        'sender_photo': sender.get('photo'),
+        'text': message.content,
+        'content': message.content,
+        'created_at': now.isoformat(),
+        'timestamp': now.isoformat()
+    }
+    
+    # Emit via socket
+    await sio.emit('new_dm', response_msg, room=chat_id)
+    
+    return {
+        "message": response_msg,
+        "chat_id": chat_id,
+        "recipient": {
+            "id": recipient_id,
+            "name": recipient['name'],
+            "sl_id": recipient.get('sl_id'),
+            "photo": recipient.get('photo')
+        }
+    }
 
 
-@api_router.get("/messages/dm/conversations")
+@api_router.get("/dm/conversations")
 async def get_dm_conversations(token_data: dict = Depends(verify_token)):
+    """Get all private chat conversations for the current user"""
     db = await get_db()
-    chats = await db.query_documents('chats', filters=[('type', '==', 'dm')])
+    user_id = token_data["user_id"]
+    
+    # Query all private chats
+    chats = await db.query_documents('chats', filters=[('chat_type', '==', 'private')])
     
     result = []
-    user_id = token_data["user_id"]
     for chat in chats:
-        if user_id in chat.get('participants', []):
-            other_id = [p for p in chat['participants'] if p != user_id][0]
+        members = chat.get('members', [])
+        
+        # Check if user is a member of this chat
+        if user_id in members:
+            # Get the other user
+            other_id = [m for m in members if m != user_id][0]
             other = await db.get_document('users', other_id)
+            
             if other:
                 result.append({
+                    "conversation_id": chat['id'],
                     "chat_id": chat['id'],
-                    "user": {"id": other_id, "name": other['name'], "sl_id": other.get('sl_id')}
+                    "user": {
+                        "id": other_id,
+                        "name": other.get('name', 'Unknown'),
+                        "sl_id": other.get('sl_id', ''),
+                        "photo": other.get('photo')
+                    },
+                    "last_message": chat.get('last_message', ''),
+                    "last_message_at": chat.get('updated_at', chat.get('created_at')),
+                    "created_at": chat.get('created_at')
                 })
+    
+    # Sort by last_message_at (most recent first)
+    result.sort(key=lambda x: x.get('last_message_at') or datetime.min, reverse=True)
+    
     return result
+
+
+@api_router.get("/dm/{chat_id}")
+async def get_dm_messages(chat_id: str, limit: int = 50, token_data: dict = Depends(verify_token)):
+    """Get messages from a private chat"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    # Verify user is part of this chat
+    chat = await db.get_document('chats', chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    if user_id not in chat.get('members', []):
+        raise HTTPException(status_code=403, detail="Not authorized to view this chat")
+    
+    messages = await db.get_chat_messages(chat_id, limit)
+    return messages
 
 
 # =================== CIRCLES ===================

@@ -237,14 +237,20 @@ backend:
   - task: "Direct Messaging"
     implemented: true
     working: true
-    file: "server.py"
+    file: "main.py"
     stuck_count: 0
-    priority: "medium"
+    priority: "high"
     needs_retesting: false
     status_history:
       - working: true
         agent: "main"
         comment: "POST /api/dm, GET /api/dm/conversations, GET /api/dm/{id} implemented"
+      - working: true
+        agent: "main"
+        comment: "Reimplemented private chat creation per user request. New logic: checks if chat exists between two users (chat_type: private, members array), creates new chat if needed, stores messages in subcollection. Endpoints: POST /api/dm, GET /api/dm/conversations, GET /api/dm/{chat_id}"
+      - working: true
+        agent: "testing"
+        comment: "Comprehensive Direct Messaging testing completed successfully. All 9 test cases passed (100% success rate). Full flow tested: User creation with OTP+registration, user search by SL-ID, first DM creation, conversation listing for both users, reply DM using existing chat (not creating new one), and message retrieval. Chat ID format correct (private_*). Deterministic chat creation working - second message uses same chat_id. Messages retrieved in correct chronological order."
 
   - task: "Health & Status Endpoints"
     implemented: true
@@ -501,3 +507,5 @@ agent_communication:
     message: "User reported sign-up and location detection broken after fork. Need to verify full flow: 1) OTP send/verify, 2) Registration, 3) Reverse geocode for location detection, 4) Dual location setup and community join. Testing agent should test complete new user journey with mock OTP 123456."
   - agent: "testing"
     message: "✅ COMPLETE SIGN-UP FLOW TESTED: All 7 test scenarios passed (100% success rate). Health check shows Firestore connected. OTP flow working with mock 123456. New user registration creates SL-ID correctly. Fixed reverse geocoding issue (was failing due to external API rate limits). Dual location setup creates and joins 4 communities automatically. Community retrieval working. Sign-up and location detection are fully functional."
+  - agent: "testing"
+    message: "✅ DIRECT MESSAGING COMPREHENSIVE TESTING: All 9 test cases passed (100% success rate). Complete DM flow verified: Two users created via OTP auth (+911111111111 -> SL-567460, +912222222222 -> SL-188855). User search by SL-ID working. First DM creates new private chat (private_5mdR6c9UV5KUxLLfDZF4_UKJ4A9YHhKtZBCfoAld3). Both users see conversation in their lists. Second message uses SAME chat (deterministic behavior confirmed). Chat messages retrieved correctly in chronological order ['Hello User Two!', 'Hi User One!']. Private chat implementation fully functional with proper chat_id format and message persistence."
