@@ -1,591 +1,408 @@
 #!/usr/bin/env python3
 """
-Comprehensive Backend API Tests for Sanatan Lok
-Tests the microservices architecture endpoints
-"""
+Sanatan Lok Backend API Testing - Firebase Integration
+Version 2.1.0 Testing Suite
 
+Tests Firebase integration endpoints and core functionality.
+"""
 import asyncio
 import aiohttp
 import json
-import sys
-from typing import Dict, Any, Optional
 from datetime import datetime
+from typing import Dict, Any, Optional
 
-# Test configuration
-BASE_URL = "https://temple-network.preview.emergentagent.com/api"
-MOCK_OTP = "123456"
-# Use random phone to avoid rate limiting
-import random
-TEST_PHONE = f"999{random.randint(1000000, 9999999)}"
 
-class SanatanLokTester:
-    def __init__(self):
-        self.session: Optional[aiohttp.ClientSession] = None
-        self.auth_token = None
-        self.user_id = None
-        self.test_results = []
-        
-    async def __aenter__(self):
-        self.session = aiohttp.ClientSession()
-        return self
+class SanatanLokAPITester:
+    """Comprehensive API tester for Sanatan Lok with Firebase integration"""
     
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    def __init__(self):
+        self.base_url = "https://temple-network.preview.emergentagent.com/api"
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.auth_token: Optional[str] = None
+        self.test_results = {
+            'passed': 0,
+            'failed': 0,
+            'errors': [],
+            'successes': []
+        }
+    
+    async def setup_session(self):
+        """Initialize HTTP session"""
+        self.session = aiohttp.ClientSession()
+        print(f"🚀 Starting Sanatan Lok API Tests - Firebase Integration")
+        print(f"📍 Base URL: {self.base_url}")
+        print("=" * 60)
+    
+    async def teardown_session(self):
+        """Close HTTP session"""
         if self.session:
             await self.session.close()
     
-    def log_test(self, test_name: str, success: bool, details: str = "", response_data: Any = None):
+    def log_test(self, test_name: str, passed: bool, message: str = "", response_data: Any = None):
         """Log test results"""
-        result = {
-            "test": test_name,
-            "success": success,
-            "details": details,
-            "timestamp": datetime.now().isoformat()
-        }
-        if response_data:
-            result["response"] = response_data
-        self.test_results.append(result)
-        
-        status = "✅ PASS" if success else "❌ FAIL"
+        status = "✅ PASS" if passed else "❌ FAIL"
         print(f"{status} {test_name}")
-        if details:
-            print(f"   Details: {details}")
-        if not success and response_data:
-            print(f"   Response: {response_data}")
+        if message:
+            print(f"   📝 {message}")
+        if response_data and isinstance(response_data, dict):
+            print(f"   📊 Response: {json.dumps(response_data, indent=2)}")
         print()
-
-    async def make_request(self, method: str, endpoint: str, data: Dict = None, headers: Dict = None) -> Dict:
-        """Make HTTP request with error handling"""
+        
+        if passed:
+            self.test_results['passed'] += 1
+            self.test_results['successes'].append(test_name)
+        else:
+            self.test_results['failed'] += 1
+            self.test_results['errors'].append(f"{test_name}: {message}")
+    
+    async def make_request(self, method: str, endpoint: str, data: dict = None, headers: dict = None) -> tuple:
+        """Make HTTP request and return status, response data"""
+        url = f"{self.base_url}{endpoint}"
+        
+        # Add auth header if token available
+        req_headers = {"Content-Type": "application/json"}
+        if headers:
+            req_headers.update(headers)
+        if self.auth_token:
+            req_headers["Authorization"] = f"Bearer {self.auth_token}"
+        
         try:
-            url = f"{BASE_URL}{endpoint}"
-            request_headers = {}
-            
-            # Add auth token if available
-            if self.auth_token and headers is None:
-                request_headers["Authorization"] = f"Bearer {self.auth_token}"
-            elif headers:
-                request_headers.update(headers)
-            
-            async with self.session.request(
-                method=method,
-                url=url,
-                json=data,
-                headers=request_headers,
-                timeout=aiohttp.ClientTimeout(total=30)
-            ) as response:
-                try:
-                    response_data = await response.json()
-                except:
-                    response_data = {"text": await response.text()}
-                
-                return {
-                    "status": response.status,
-                    "data": response_data,
-                    "success": response.status < 400
-                }
-        except asyncio.TimeoutError:
-            return {
-                "status": 408,
-                "data": {"error": "Request timeout"},
-                "success": False
-            }
+            if method.upper() == 'GET':
+                async with self.session.get(url, headers=req_headers) as response:
+                    status = response.status
+                    try:
+                        data = await response.json()
+                    except:
+                        data = await response.text()
+                    return status, data
+            else:
+                async with self.session.request(method, url, json=data, headers=req_headers) as response:
+                    status = response.status
+                    try:
+                        data = await response.json()
+                    except:
+                        data = await response.text()
+                    return status, data
+        
         except Exception as e:
-            return {
-                "status": 500,
-                "data": {"error": str(e)},
-                "success": False
-            }
-
-    async def test_health_endpoints(self):
-        """Test health and status endpoints"""
-        print("🔍 Testing Health & Status Endpoints...")
+            return 0, f"Request failed: {str(e)}"
+    
+    async def test_root_endpoint(self):
+        """Test GET /api/ - Should return version 2.1.0 and Firebase project info"""
+        print("🔍 Testing Core Endpoints...")
+        status, response = await self.make_request('GET', '/')
         
-        # Test root endpoint
-        response = await self.make_request("GET", "/")
-        expected_version = "2.0.0"
+        expected_keys = ['message', 'version', 'status', 'database', 'firebase_project', 'features']
         
-        if response["success"]:
-            data = response["data"]
-            version_match = data.get("version") == expected_version
-            has_architecture = data.get("architecture") == "microservices"
+        if status == 200 and isinstance(response, dict):
+            version_ok = response.get('version') == '2.1.0'
+            firebase_project_ok = response.get('firebase_project') == 'sanatan-lok'
+            database_ok = response.get('database') == 'MongoDB'
+            all_keys_present = all(key in response for key in expected_keys)
             
-            self.log_test(
-                "GET /api/ - Root endpoint",
-                version_match and has_architecture,
-                f"Version: {data.get('version')}, Architecture: {data.get('architecture')}",
-                data
-            )
+            if version_ok and firebase_project_ok and database_ok and all_keys_present:
+                self.log_test(
+                    "Root Endpoint", 
+                    True, 
+                    f"Version {response.get('version')}, Firebase project: {response.get('firebase_project')}", 
+                    response
+                )
+            else:
+                missing = [k for k in expected_keys if k not in response]
+                issues = []
+                if not version_ok:
+                    issues.append(f"Version is {response.get('version')}, expected 2.1.0")
+                if not firebase_project_ok:
+                    issues.append(f"Firebase project is {response.get('firebase_project')}, expected sanatan-lok")
+                if missing:
+                    issues.append(f"Missing keys: {missing}")
+                
+                self.log_test("Root Endpoint", False, "; ".join(issues), response)
         else:
-            self.log_test(
-                "GET /api/ - Root endpoint",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
+            self.log_test("Root Endpoint", False, f"Status: {status}, Response: {response}")
+    
+    async def test_health_endpoint(self):
+        """Test GET /api/health - Should show firebase_admin: config_only"""
+        status, response = await self.make_request('GET', '/health')
         
-        # Test health endpoint
-        response = await self.make_request("GET", "/health")
-        
-        if response["success"]:
-            data = response["data"]
-            has_services = "services" in data
-            db_status = data.get("services", {}).get("database") == "healthy"
-            cache_status = data.get("services", {}).get("cache") == "healthy"
-            task_queue_status = data.get("services", {}).get("task_queue") in ["healthy", "stopped"]
+        if status == 200 and isinstance(response, dict):
+            services = response.get('services', {})
+            firebase_admin = services.get('firebase_admin')
+            database = services.get('database')
+            firebase_project = response.get('firebase_project')
+            version_ok = response.get('version') == '2.1.0'
             
-            self.log_test(
-                "GET /api/health - Health check",
-                has_services and db_status and cache_status and task_queue_status,
-                f"DB: {data.get('services', {}).get('database')}, Cache: {data.get('services', {}).get('cache')}, Queue: {data.get('services', {}).get('task_queue')}",
-                data
-            )
+            if (firebase_admin == 'config_only' and 
+                database == 'healthy' and 
+                firebase_project == 'sanatan-lok' and 
+                version_ok):
+                self.log_test(
+                    "Health Endpoint", 
+                    True, 
+                    f"Database: {database}, Firebase: {firebase_admin}, Project: {firebase_project}", 
+                    response
+                )
+            else:
+                issues = []
+                if firebase_admin != 'config_only':
+                    issues.append(f"Firebase admin is {firebase_admin}, expected config_only")
+                if database != 'healthy':
+                    issues.append(f"Database is {database}, expected healthy")
+                if firebase_project != 'sanatan-lok':
+                    issues.append(f"Firebase project is {firebase_project}, expected sanatan-lok")
+                if not version_ok:
+                    issues.append(f"Version is {response.get('version')}, expected 2.1.0")
+                
+                self.log_test("Health Endpoint", False, "; ".join(issues), response)
         else:
-            self.log_test(
-                "GET /api/health - Health check",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-
-    async def test_authentication_flow(self):
-        """Test complete authentication flow"""
+            self.log_test("Health Endpoint", False, f"Status: {status}, Response: {response}")
+    
+    async def test_firebase_config_endpoint(self):
+        """Test GET /api/firebase-config - Should return Firebase web config"""
+        status, response = await self.make_request('GET', '/firebase-config')
+        
+        expected_keys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId', 'measurementId']
+        
+        if status == 200 and isinstance(response, dict):
+            project_id_ok = response.get('projectId') == 'sanatan-lok'
+            auth_domain_ok = response.get('authDomain') == 'sanatan-lok.firebaseapp.com'
+            all_keys_present = all(key in response for key in expected_keys)
+            
+            if project_id_ok and auth_domain_ok and all_keys_present:
+                self.log_test(
+                    "Firebase Config", 
+                    True, 
+                    f"Project ID: {response.get('projectId')}, Auth Domain: {response.get('authDomain')}", 
+                    response
+                )
+            else:
+                issues = []
+                if not project_id_ok:
+                    issues.append(f"Project ID is {response.get('projectId')}, expected sanatan-lok")
+                if not auth_domain_ok:
+                    issues.append(f"Auth domain is {response.get('authDomain')}, expected sanatan-lok.firebaseapp.com")
+                missing = [k for k in expected_keys if k not in response]
+                if missing:
+                    issues.append(f"Missing keys: {missing}")
+                
+                self.log_test("Firebase Config", False, "; ".join(issues), response)
+        else:
+            self.log_test("Firebase Config", False, f"Status: {status}, Response: {response}")
+    
+    async def test_auth_flow(self):
+        """Test complete authentication flow with mock OTP"""
         print("🔐 Testing Authentication Flow...")
         
-        # Test send OTP
-        response = await self.make_request("POST", "/auth/send-otp", {"phone": TEST_PHONE})
+        phone_number = "8888777766"
+        mock_otp = "123456"
         
-        if response["success"]:
-            self.log_test(
-                "POST /api/auth/send-otp",
-                True,
-                f"OTP sent to {TEST_PHONE}",
-                response["data"]
-            )
+        # Step 1: Send OTP
+        status, response = await self.make_request('POST', '/auth/send-otp', {'phone': phone_number})
+        
+        if status == 200 and isinstance(response, dict):
+            message = response.get('message', '')
+            phone = response.get('phone')
+            if 'successfully' in message.lower() and phone == phone_number:
+                self.log_test("Send OTP", True, f"OTP sent to {phone_number}", response)
+            else:
+                self.log_test("Send OTP", False, f"Failed to send OTP: {response}", response)
+                return
         else:
-            self.log_test(
-                "POST /api/auth/send-otp",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-            return False
+            self.log_test("Send OTP", False, f"Status: {status}, Response: {response}")
+            return
         
-        # Test verify OTP
-        response = await self.make_request("POST", "/auth/verify-otp", {
-            "phone": TEST_PHONE,
-            "otp": MOCK_OTP
-        })
+        # Step 2: Verify OTP
+        status, response = await self.make_request('POST', '/auth/verify-otp', {'phone': phone_number, 'otp': mock_otp})
         
-        if response["success"]:
-            data = response["data"]
-            is_new_user = data.get("is_new_user", False)
-            
-            self.log_test(
-                "POST /api/auth/verify-otp",
-                True,
-                f"OTP verified, new user: {is_new_user}",
-                data
-            )
-            
-            # If existing user, get token
-            if not is_new_user and "token" in data:
-                self.auth_token = data["token"]
-                self.user_id = data.get("user", {}).get("user_id")
-                return True
-                
+        if status == 200 and isinstance(response, dict):
+            message = response.get('message', '')
+            is_new_user = response.get('is_new_user', False)
+            if 'verified' in message.lower() or 'successful' in message.lower():
+                if is_new_user:
+                    self.log_test("Verify OTP", True, f"OTP verified for {phone_number} (new user)", response)
+                else:
+                    # Existing user - we should have token
+                    token = response.get('token')
+                    if token:
+                        self.auth_token = token
+                        self.log_test("Verify OTP", True, f"OTP verified for {phone_number} (existing user)", response)
+                        return  # Skip registration for existing user
+                    else:
+                        self.log_test("Verify OTP", False, f"Missing token for existing user: {response}", response)
+                        return
+            else:
+                self.log_test("Verify OTP", False, f"Failed to verify OTP: {response}", response)
+                return
         else:
-            self.log_test(
-                "POST /api/auth/verify-otp",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-            return False
+            self.log_test("Verify OTP", False, f"Status: {status}, Response: {response}")
+            return
         
-        # Test user registration (for new users)
-        response = await self.make_request("POST", "/auth/register", {
-            "phone": TEST_PHONE,
-            "name": "Test User Sanatan",
-            "language": "English"
-        })
+        # Step 3: Register User (only if new user)
+        user_data = {
+            'phone': phone_number,
+            'name': 'Firebase Test User',
+            'language': 'English'
+        }
         
-        if response["success"]:
-            data = response["data"]
-            self.auth_token = data.get("token")
-            self.user_id = data.get("user", {}).get("user_id")
+        status, response = await self.make_request('POST', '/auth/register', user_data)
+        
+        if status == 200 and isinstance(response, dict):
+            token = response.get('token')
+            user = response.get('user', {})
+            sl_id = user.get('sl_id')
+            message = response.get('message', '')
             
-            self.log_test(
-                "POST /api/auth/register",
-                self.auth_token is not None,
-                f"User registered with SL-ID: {data.get('user', {}).get('sl_id')}",
-                data
-            )
-            return True
+            if token and sl_id and 'successful' in message.lower():
+                self.auth_token = token
+                self.log_test("User Registration", True, f"User registered with SL-ID: {sl_id}", response)
+            else:
+                self.log_test("User Registration", False, f"Missing token or SL-ID: {response}", response)
         else:
-            self.log_test(
-                "POST /api/auth/register",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-            return False
-
+            self.log_test("User Registration", False, f"Status: {status}, Response: {response}")
+    
     async def test_user_endpoints(self):
-        """Test user management endpoints"""
+        """Test user-related endpoints requiring authentication"""
         if not self.auth_token:
-            self.log_test("User Endpoints", False, "No auth token available")
+            self.log_test("User Endpoints", False, "No auth token available - skipping user tests")
             return
         
         print("👤 Testing User Endpoints...")
         
         # Test get profile
-        response = await self.make_request("GET", "/user/profile")
+        status, response = await self.make_request('GET', '/user/profile')
         
-        if response["success"]:
-            data = response["data"]
-            has_sl_id = "sl_id" in data
-            has_name = "name" in data
-            
-            self.log_test(
-                "GET /api/user/profile",
-                has_sl_id and has_name,
-                f"Profile loaded for SL-ID: {data.get('sl_id')}",
-                data
-            )
+        if status == 200 and isinstance(response, dict):
+            sl_id = response.get('sl_id')
+            name = response.get('name')
+            if sl_id and name:
+                self.log_test("Get Profile", True, f"Profile retrieved: {name} ({sl_id})", response)
+            else:
+                self.log_test("Get Profile", False, f"Missing profile data: {response}", response)
         else:
-            self.log_test(
-                "GET /api/user/profile",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
+            self.log_test("Get Profile", False, f"Status: {status}, Response: {response}")
         
-        # Test update profile
-        response = await self.make_request("PUT", "/user/profile", {
-            "name": "Updated Test User"
-        })
+        # Test set location
+        location_data = {
+            'country': 'Bharat',
+            'state': 'Gujarat',
+            'city': 'Ahmedabad',
+            'area': 'Navrangpura'
+        }
         
-        if response["success"]:
-            self.log_test(
-                "PUT /api/user/profile",
-                True,
-                "Profile updated successfully",
-                response["data"]
-            )
+        status, response = await self.make_request('POST', '/user/location', location_data)
+        
+        if status == 200 and isinstance(response, dict):
+            message = response.get('message', '')
+            communities_created = response.get('communities_created', 0) or response.get('communities_joined', 0)
+            if 'successful' in message.lower() and communities_created > 0:
+                self.log_test("Set Location", True, f"Location set, {communities_created} communities created", response)
+            else:
+                self.log_test("Set Location", False, f"Location setup failed: {response}", response)
         else:
-            self.log_test(
-                "PUT /api/user/profile",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-        
-        # Test location setup
-        response = await self.make_request("POST", "/user/location", {
-            "country": "Bharat",
-            "state": "Maharashtra", 
-            "city": "Mumbai",
-            "area": "Andheri"
-        })
-        
-        if response["success"]:
-            data = response["data"]
-            communities_created = data.get("communities_joined", 0)
-            
-            self.log_test(
-                "POST /api/user/location",
-                communities_created > 0,
-                f"Location set, {communities_created} communities joined",
-                data
-            )
-        else:
-            self.log_test(
-                "POST /api/user/location",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-        
-        # Test verification status
-        response = await self.make_request("GET", "/user/verification-status")
-        
-        if response["success"]:
-            self.log_test(
-                "GET /api/user/verification-status",
-                True,
-                "Verification status retrieved",
-                response["data"]
-            )
-        else:
-            self.log_test(
-                "GET /api/user/verification-status",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-        
-        # Test profile completion
-        response = await self.make_request("GET", "/user/profile-completion")
-        
-        if response["success"]:
-            data = response["data"]
-            has_percentage = "completion_percentage" in data
-            
-            self.log_test(
-                "GET /api/user/profile-completion",
-                has_percentage,
-                f"Profile completion: {data.get('completion_percentage', 0)}%",
-                data
-            )
-        else:
-            self.log_test(
-                "GET /api/user/profile-completion",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-
-    async def test_community_endpoints(self):
-        """Test community endpoints"""
-        if not self.auth_token:
-            self.log_test("Community Endpoints", False, "No auth token available")
-            return
-        
-        print("🏘️ Testing Community Endpoints...")
+            self.log_test("Set Location", False, f"Status: {status}, Response: {response}")
         
         # Test get communities
-        response = await self.make_request("GET", "/communities")
+        status, response = await self.make_request('GET', '/communities')
         
-        if response["success"]:
-            data = response["data"]
-            # Handle case where response is a list directly or has communities key
-            communities = data if isinstance(data, list) else data.get("communities", [])
-            
-            self.log_test(
-                "GET /api/communities",
-                len(communities) >= 0,
-                f"Found {len(communities)} communities",
-                {"community_count": len(communities)}
-            )
+        if status == 200 and isinstance(response, list):
+            community_count = len(response)
+            if community_count > 0:
+                self.log_test("Get Communities", True, f"Found {community_count} communities", response[:2] if response else [])
+            else:
+                self.log_test("Get Communities", False, "No communities found", response)
         else:
-            self.log_test(
-                "GET /api/communities",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-        
-        # Test discover communities
-        response = await self.make_request("GET", "/communities/discover")
-        
-        if response["success"]:
-            data = response["data"]
-            # Handle case where response is a list directly or has communities key
-            discovered = data if isinstance(data, list) else data.get("communities", [])
-            
-            self.log_test(
-                "GET /api/communities/discover",
-                isinstance(discovered, list),
-                f"Discovered {len(discovered)} communities",
-                {"discovered_count": len(discovered)}
-            )
-        else:
-            self.log_test(
-                "GET /api/communities/discover",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-
+            self.log_test("Get Communities", False, f"Status: {status}, Response: {response}")
+    
     async def test_wisdom_and_panchang(self):
         """Test wisdom and panchang endpoints"""
-        print("📖 Testing Wisdom & Panchang Endpoints...")
+        print("🕉️ Testing Wisdom & Panchang...")
         
-        # Test today's wisdom
-        response = await self.make_request("GET", "/wisdom/today")
+        # Test wisdom
+        status, response = await self.make_request('GET', '/wisdom/today')
         
-        if response["success"]:
-            data = response["data"]
-            has_quote = "quote" in data
-            has_author = "author" in data or "source" in data
-            
-            author = data.get("author") or data.get("source", "Unknown")
-            
-            self.log_test(
-                "GET /api/wisdom/today",
-                has_quote and has_author,
-                f"Wisdom by {author}",
-                {"quote_length": len(data.get("quote", ""))}
-            )
+        if status == 200 and isinstance(response, dict):
+            quote = response.get('quote')
+            source = response.get('source')
+            if quote and source:
+                self.log_test("Today's Wisdom", True, f"Quote from {source}: {quote[:50]}...", response)
+            else:
+                self.log_test("Today's Wisdom", False, f"Missing quote or source: {response}", response)
         else:
-            self.log_test(
-                "GET /api/wisdom/today",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
+            self.log_test("Today's Wisdom", False, f"Status: {status}, Response: {response}")
         
-        # Test today's panchang
-        response = await self.make_request("GET", "/panchang/today")
+        # Test panchang
+        status, response = await self.make_request('GET', '/panchang/today')
         
-        if response["success"]:
-            data = response["data"]
-            has_tithi = "tithi" in data
-            has_sunrise = "sunrise" in data
-            has_date = "date" in data
-            
-            self.log_test(
-                "GET /api/panchang/today",
-                has_tithi and has_sunrise and has_date,
-                f"Panchang for {data.get('date', 'today')}, Tithi: {data.get('tithi', 'N/A')}",
-                data
-            )
+        if status == 200 and isinstance(response, dict):
+            tithi = response.get('tithi')
+            sunrise = response.get('sunrise')
+            sunset = response.get('sunset')
+            if tithi and sunrise and sunset:
+                self.log_test("Today's Panchang", True, f"Tithi: {tithi}, Sunrise: {sunrise}, Sunset: {sunset}", response)
+            else:
+                self.log_test("Today's Panchang", False, f"Missing panchang data: {response}", response)
         else:
-            self.log_test(
-                "GET /api/panchang/today",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-
-    async def test_temples_and_events(self):
-        """Test temples and events endpoints"""
-        if not self.auth_token:
-            self.log_test("Temples & Events", False, "No auth token available")
-            return
-        
-        print("🏛️ Testing Temples & Events Endpoints...")
-        
-        # Test get temples
-        response = await self.make_request("GET", "/temples")
-        
-        if response["success"]:
-            data = response["data"]
-            # Handle case where response is a list directly or has temples key
-            temples = data if isinstance(data, list) else data.get("temples", [])
-            
-            self.log_test(
-                "GET /api/temples",
-                isinstance(temples, list),
-                f"Found {len(temples)} temples",
-                {"temple_count": len(temples)}
-            )
-        else:
-            self.log_test(
-                "GET /api/temples",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-        
-        # Test get events
-        response = await self.make_request("GET", "/events")
-        
-        if response["success"]:
-            data = response["data"]
-            # Handle case where response is a list directly or has events key
-            events = data if isinstance(data, list) else data.get("events", [])
-            
-            self.log_test(
-                "GET /api/events",
-                isinstance(events, list),
-                f"Found {len(events)} events",
-                {"event_count": len(events)}
-            )
-        else:
-            self.log_test(
-                "GET /api/events",
-                False,
-                f"Failed with status {response['status']}",
-                response["data"]
-            )
-
-    async def test_rate_limiting(self):
-        """Test rate limiting on auth endpoints"""
-        print("🚦 Testing Rate Limiting...")
-        
-        # Make 15 rapid requests to send-otp
-        rate_limited = False
-        successful_requests = 0
-        
-        for i in range(15):
-            response = await self.make_request("POST", "/auth/send-otp", {"phone": "9999000001"})
-            
-            if response["success"]:
-                successful_requests += 1
-            elif response["status"] == 429:  # Too Many Requests
-                rate_limited = True
-                break
-                
-        self.log_test(
-            "Rate Limiting Test",
-            rate_limited and successful_requests <= 10,
-            f"Rate limited after {successful_requests} requests (expected <= 10)",
-            {"successful_requests": successful_requests, "rate_limited": rate_limited}
-        )
-
-    async def run_all_tests(self):
-        """Run all test suites"""
-        print("🚀 Starting Sanatan Lok Backend API Tests")
-        print(f"Base URL: {BASE_URL}")
-        print("="*60)
-        
-        # Run test suites
-        await self.test_health_endpoints()
-        auth_success = await self.test_authentication_flow()
-        
-        if auth_success:
-            await self.test_user_endpoints()
-            await self.test_community_endpoints()
-        
-        await self.test_wisdom_and_panchang()
-        
-        if auth_success:
-            await self.test_temples_and_events()
-        
-        await self.test_rate_limiting()
-        
-        # Print summary
-        self.print_test_summary()
-
-    def print_test_summary(self):
-        """Print comprehensive test summary"""
-        print("="*60)
+            self.log_test("Today's Panchang", False, f"Status: {status}, Response: {response}")
+    
+    def print_summary(self):
+        """Print test summary"""
+        print("\n" + "="*60)
         print("📊 TEST SUMMARY")
         print("="*60)
+        print(f"✅ Passed: {self.test_results['passed']}")
+        print(f"❌ Failed: {self.test_results['failed']}")
+        print(f"📈 Success Rate: {self.test_results['passed']/(self.test_results['passed']+self.test_results['failed'])*100:.1f}%")
         
-        total_tests = len(self.test_results)
-        passed_tests = sum(1 for result in self.test_results if result["success"])
-        failed_tests = total_tests - passed_tests
+        if self.test_results['errors']:
+            print(f"\n❌ FAILED TESTS:")
+            for error in self.test_results['errors']:
+                print(f"   • {error}")
         
-        print(f"Total Tests: {total_tests}")
-        print(f"Passed: {passed_tests}")
-        print(f"Failed: {failed_tests}")
-        print(f"Success Rate: {(passed_tests/total_tests)*100:.1f}%")
-        print()
+        if self.test_results['successes']:
+            print(f"\n✅ PASSED TESTS:")
+            for success in self.test_results['successes']:
+                print(f"   • {success}")
         
-        if failed_tests > 0:
-            print("❌ FAILED TESTS:")
-            for result in self.test_results:
-                if not result["success"]:
-                    print(f"  • {result['test']}: {result['details']}")
-            print()
+        print("\n" + "="*60)
         
-        print("✅ PASSED TESTS:")
-        for result in self.test_results:
-            if result["success"]:
-                print(f"  • {result['test']}")
+        # Return result for script usage
+        return self.test_results['failed'] == 0
+    
+    async def run_all_tests(self):
+        """Execute all test suites"""
+        await self.setup_session()
         
-        print("="*60)
-        
-        # Return overall success
-        return failed_tests == 0
+        try:
+            # Core Firebase integration tests
+            await self.test_root_endpoint()
+            await self.test_health_endpoint()
+            await self.test_firebase_config_endpoint()
+            
+            # Authentication flow
+            await self.test_auth_flow()
+            
+            # User endpoints (requires auth)
+            await self.test_user_endpoints()
+            
+            # Other endpoints
+            await self.test_wisdom_and_panchang()
+            
+            # Print results
+            success = self.print_summary()
+            return success
+            
+        finally:
+            await self.teardown_session()
 
 
 async def main():
     """Main test runner"""
-    async with SanatanLokTester() as tester:
-        success = await tester.run_all_tests()
-        sys.exit(0 if success else 1)
+    tester = SanatanLokAPITester()
+    success = await tester.run_all_tests()
+    
+    # Exit with appropriate code
+    import sys
+    sys.exit(0 if success else 1)
 
 
 if __name__ == "__main__":

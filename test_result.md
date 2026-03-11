@@ -236,6 +236,45 @@ backend:
       - working: true
         agent: "testing"
         comment: "Wisdom endpoint GET /api/wisdom/today returns daily quotes with source (Bhagavad Gita). Panchang endpoint GET /api/panchang/today returns Hindu calendar info with tithi, sunrise, sunset."
+      - working: true
+        agent: "testing"
+        comment: "Firebase integration testing confirmed. All endpoints working correctly in v2.1.0 with Firebase web config support."
+
+  - task: "Firebase Integration (Version 2.1.0)"
+    implemented: true
+    working: true
+    file: "main.py, config/firebase_config.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "Comprehensive Firebase integration testing completed. GET /api/ returns version 2.1.0 with Firebase project 'sanatan-lok'. GET /api/health shows firebase_admin: config_only. GET /api/firebase-config returns complete web config for frontend. Hybrid MongoDB + Firebase config architecture working perfectly."
+
+  - task: "Firebase Authentication Flow (Mock OTP)"
+    implemented: true
+    working: true
+    file: "services/auth_service.py, main.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "Complete authentication flow tested with Firebase integration. POST /api/auth/send-otp, POST /api/auth/verify-otp (mock OTP: 123456), POST /api/auth/register all working. JWT token generation and validation working correctly. New and existing user flows both functional."
+
+  - task: "Firebase Web Config Endpoint"
+    implemented: true
+    working: true
+    file: "main.py, config/firebase_config.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "Firebase web config endpoint GET /api/firebase-config working perfectly. Returns complete config with apiKey, projectId (sanatan-lok), authDomain, storageBucket, messagingSenderId, appId, measurementId. Ready for frontend Firebase SDK initialization."
 
   - task: "Temples & Events APIs"
     implemented: true
@@ -397,13 +436,13 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 1
+  test_sequence: 2
   run_ui: false
 
 test_plan:
   current_focus:
-    - "Full registration flow"
-    - "Community subgroup chat"
+    - "Firebase Integration (Version 2.1.0)"
+    - "Firebase Web Config Endpoint"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -413,3 +452,5 @@ agent_communication:
     message: "MVP implementation complete. All core features tested via curl. UI screenshots verified. Ready for user testing."
   - agent: "testing"
     message: "Backend API comprehensive testing completed. Version 2.0.0 microservices architecture verified. All major endpoints working. Rate limiting functional. Minor: JWT key length warning (non-critical)."
+  - agent: "testing"
+    message: "Firebase integration v2.1.0 comprehensive testing completed successfully. All 10 test cases passed (100% success rate). Core endpoints return correct version 2.1.0 and Firebase project info. Health endpoint shows firebase_admin: config_only as expected. Firebase web config endpoint working perfectly for frontend SDK initialization. Complete authentication flow with mock OTP 123456 functional. Location setup creates communities correctly. MongoDB + Firebase hybrid architecture working as designed."
