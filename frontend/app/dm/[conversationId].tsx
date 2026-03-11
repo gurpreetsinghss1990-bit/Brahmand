@@ -21,15 +21,12 @@ import { Conversation } from '../../src/types';
 import { Avatar } from '../../src/components/Avatar';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 
-const HEADER_HEIGHT = 70;
-
 export default function DirectMessageScreen() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const router = useRouter();
   const { user } = useAuthStore();
   const flatListRef = useRef<FlatList>(null);
   const insets = useSafeAreaInsets();
-  const inputRef = useRef<TextInput>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -37,70 +34,36 @@ export default function DirectMessageScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [isRealtime, setIsRealtime] = useState(false);
-  const [containerHeight, setContainerHeight] = useState(Dimensions.get('window').height);
+  const [viewHeight, setViewHeight] = useState(Dimensions.get('window').height);
 
-  // iOS Safari viewport fix - inject CSS and handle resize
+  // Handle viewport resize for iOS Safari keyboard
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      // Inject CSS to fix iOS Safari issues
-      const styleId = 'ios-safari-fix';
-      if (!document.getElementById(styleId)) {
-        const style = document.createElement('style');
-        style.id = styleId;
-        style.textContent = `
-          html, body {
-            height: 100%;
-            overflow: hidden;
-            position: fixed;
-            width: 100%;
-          }
-          #root {
-            height: 100%;
-            overflow: hidden;
-          }
-        `;
-        document.head.appendChild(style);
-      }
-
-      // Handle visual viewport changes (iOS Safari keyboard)
-      const updateHeight = () => {
-        if (window.visualViewport) {
-          setContainerHeight(window.visualViewport.height);
-        } else {
-          setContainerHeight(window.innerHeight);
-        }
-        // Scroll to bottom
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 50);
+      const handleResize = () => {
+        const height = window.visualViewport?.height || window.innerHeight;
+        setViewHeight(height);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
       };
 
-      // Initial height
-      updateHeight();
-
-      // Listen for viewport changes
+      handleResize();
+      
       if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', updateHeight);
-        window.visualViewport.addEventListener('scroll', updateHeight);
+        window.visualViewport.addEventListener('resize', handleResize);
       }
-      window.addEventListener('resize', updateHeight);
+      window.addEventListener('resize', handleResize);
 
       return () => {
         if (window.visualViewport) {
-          window.visualViewport.removeEventListener('resize', updateHeight);
-          window.visualViewport.removeEventListener('scroll', updateHeight);
+          window.visualViewport.removeEventListener('resize', handleResize);
         }
-        window.removeEventListener('resize', updateHeight);
+        window.removeEventListener('resize', handleResize);
       };
     } else {
-      // Native keyboard handling
-      const showSub = Keyboard.addListener(
+      const sub = Keyboard.addListener(
         Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-        () => {
-          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-        }
+        () => setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100)
       );
-      return () => showSub.remove();
+      return () => sub.remove();
     }
   }, []);
 
@@ -236,25 +199,18 @@ export default function DirectMessageScreen() {
     );
   }
 
-  // Calculate heights
-  const safeTop = insets.top || (Platform.OS === 'web' ? 0 : 44);
-  const safeBottom = insets.bottom || (Platform.OS === 'web' ? 0 : 34);
-  const inputHeight = 60 + safeBottom;
-  const availableHeight = Platform.OS === 'web' 
-    ? containerHeight 
-    : Dimensions.get('window').height;
-  const messagesHeight = availableHeight - safeTop - HEADER_HEIGHT - inputHeight;
+  const bottomPadding = Platform.OS === 'web' ? 8 : Math.max(insets.bottom, 8);
 
   return (
     <View style={[
       styles.container,
-      Platform.OS === 'web' && { height: containerHeight, maxHeight: containerHeight }
+      Platform.OS === 'web' && { height: viewHeight }
     ]}>
-      {/* Safe area top padding */}
-      <View style={{ height: safeTop, backgroundColor: COLORS.surface }} />
+      {/* Safe area top */}
+      <View style={{ height: insets.top, backgroundColor: COLORS.surface }} />
       
       {/* Header */}
-      <View style={[styles.header, { height: HEADER_HEIGHT }]}>
+      <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
@@ -277,8 +233,8 @@ export default function DirectMessageScreen() {
         )}
       </View>
 
-      {/* Messages - Fixed height container */}
-      <View style={{ height: messagesHeight, flex: 0 }}>
+      {/* Messages - takes remaining space */}
+      <View style={styles.messagesWrapper}>
         <FlatList
           ref={flatListRef}
           data={messages}
@@ -287,7 +243,6 @@ export default function DirectMessageScreen() {
           contentContainerStyle={styles.messagesList}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
           keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={true}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="chatbubble-outline" size={48} color={COLORS.textLight} />
@@ -297,10 +252,9 @@ export default function DirectMessageScreen() {
         />
       </View>
 
-      {/* Input - Fixed at bottom */}
-      <View style={[styles.inputContainer, { paddingBottom: Math.max(safeBottom, 8) }]}>
+      {/* Input - anchored at bottom */}
+      <View style={[styles.inputContainer, { paddingBottom: bottomPadding }]}>
         <TextInput
-          ref={inputRef}
           style={styles.input}
           placeholder="Type a message..."
           value={newMessage}
@@ -308,9 +262,7 @@ export default function DirectMessageScreen() {
           multiline
           maxLength={1000}
           placeholderTextColor={COLORS.textLight}
-          onFocus={() => {
-            setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 300);
-          }}
+          onFocus={() => setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 300)}
         />
         <TouchableOpacity
           style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}
@@ -332,11 +284,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
-    ...(Platform.OS === 'web' ? {
-      overflow: 'hidden' as const,
-      display: 'flex' as const,
-      flexDirection: 'column' as const,
-    } : {}),
+    display: 'flex',
+    flexDirection: 'column',
   },
   loadingContainer: {
     flex: 1,
@@ -352,10 +301,11 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.md,
+    padding: SPACING.md,
     backgroundColor: COLORS.surface,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.divider,
+    flexShrink: 0,
   },
   backButton: {
     marginRight: SPACING.md,
@@ -399,6 +349,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     color: '#4CAF50',
+  },
+  messagesWrapper: {
+    flex: 1,
+    overflow: 'hidden',
   },
   messagesList: {
     padding: SPACING.md,
@@ -458,11 +412,12 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: SPACING.md,
+    padding: SPACING.md,
     paddingTop: SPACING.sm,
     backgroundColor: COLORS.surface,
     borderTopWidth: 1,
     borderTopColor: COLORS.divider,
+    flexShrink: 0,
   },
   input: {
     flex: 1,
@@ -470,7 +425,7 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
-    fontSize: 16, // 16px prevents iOS Safari zoom
+    fontSize: 16,
     color: COLORS.text,
     maxHeight: 100,
     minHeight: 40,
