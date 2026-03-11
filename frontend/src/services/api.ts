@@ -178,4 +178,48 @@ export const getHoroscope = () =>
 export const getCommunityStats = (communityId: string) => 
   api.get(`/communities/${communityId}/stats`);
 
+// KYC APIs
+export const getKYCStatus = () => 
+  api.get('/kyc/status');
+
+export const submitKYC = (data: { 
+  kyc_role: 'temple' | 'vendor' | 'organizer';
+  id_type: 'aadhaar' | 'pan';
+  id_number: string;
+  id_photo?: string;
+  selfie_photo?: string;
+}) => 
+  api.post('/kyc/submit', data);
+
+// Report APIs
+export const reportContent = (data: {
+  content_type: 'message' | 'user' | 'temple' | 'post';
+  content_id: string;
+  chat_id?: string;
+  category: 'religious_attack' | 'disrespectful' | 'spam' | 'abuse' | 'other';
+  description?: string;
+}) => 
+  api.post('/report', data);
+
+// Temple Channel APIs
+export const createTemple = (data: {
+  name: string;
+  location: { city?: string; area?: string; state?: string; country?: string };
+  description?: string;
+  deity?: string;
+  aarti_timings?: { [key: string]: string };
+}) => 
+  api.post('/temples', data);
+
+export const createTemplePost = (templeId: string, data: {
+  title: string;
+  content: string;
+  post_type?: 'announcement' | 'event' | 'donation' | 'aarti';
+}) => 
+  api.post(`/temples/${templeId}/posts`, data);
+
+// Mark messages as read
+export const markMessagesRead = (chatId: string) => 
+  api.post(`/dm/${chatId}/read`);
+
 export default api;

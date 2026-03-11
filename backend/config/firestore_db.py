@@ -263,3 +263,12 @@ class FirestoreDB:
             self.client.collection('chats').document(chat_id).collection('messages').document(message_id).update(update_data)
         
         await self._run_sync(_update)
+    
+    async def array_remove_update(self, collection: str, doc_id: str, field: str, values: list) -> None:
+        """Remove values from an array field"""
+        def _update():
+            from google.cloud import firestore
+            doc_ref = self.client.collection(collection).document(doc_id)
+            doc_ref.update({field: firestore.ArrayRemove(values)})
+        
+        await self._run_sync(_update)

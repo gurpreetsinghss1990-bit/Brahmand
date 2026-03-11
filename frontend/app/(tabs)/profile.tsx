@@ -268,6 +268,20 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
           </TouchableOpacity>
           
+          <TouchableOpacity 
+            style={styles.settingsItem}
+            onPress={() => router.push('/settings/guidelines')}
+          >
+            <View style={[styles.settingsIcon, { backgroundColor: `${COLORS.warning}15` }]}>
+              <Ionicons name="document-text" size={20} color={COLORS.warning} />
+            </View>
+            <View style={styles.settingsInfo}>
+              <Text style={styles.settingsLabel}>Community Guidelines</Text>
+              <Text style={styles.settingsDesc}>Rules and conduct</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+          </TouchableOpacity>
+          
           <TouchableOpacity style={styles.settingsItem}>
             <View style={[styles.settingsIcon, { backgroundColor: `${COLORS.secondary}15` }]}>
               <Ionicons name="notifications" size={20} color={COLORS.secondary} />

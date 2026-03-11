@@ -87,7 +87,8 @@ export default function OTPScreen() {
         const data = response.data;
 
         if (data.is_new_user) {
-          router.push({ pathname: '/auth/profile', params: { phone } });
+          // Route to declaration screen first for new users
+          router.push({ pathname: '/auth/declaration', params: { phone, firebase_uid: data.firebase_uid } });
         } else {
           await login(data.user, data.token);
           if (data.user.home_location || data.user.location) {

@@ -379,6 +379,8 @@ async def verify_otp(request: OTPVerify, _: bool = Depends(auth_rate_limit)):
 @api_router.post("/auth/register")
 async def register_user(user_data: UserCreate, _: bool = Depends(auth_rate_limit)):
     """Register new user"""
+    from services.image_service import compress_base64_image, is_valid_image
+    
     db = await get_db()
     
     # Check existing
@@ -391,11 +393,20 @@ async def register_user(user_data: UserCreate, _: bool = Depends(auth_rate_limit
     while await db.get_user_by_sl_id(sl_id):
         sl_id = generate_sl_id()
     
-    # Handle photo - truncate if too large for Firestore (max ~1MB)
+    # Handle photo - compress and resize if provided (no size limit for users)
     photo_data = user_data.photo
-    if photo_data and len(photo_data) > 900000:  # ~900KB limit for safety
-        logger.warning(f"Photo too large ({len(photo_data)} bytes), storing without photo")
-        photo_data = None  # Don't store oversized photos
+    if photo_data:
+        try:
+            if is_valid_image(photo_data):
+                # Compress to 512px max and optimize
+                photo_data = compress_base64_image(photo_data, max_size=512, quality=85)
+                logger.info(f"Profile photo compressed successfully")
+            else:
+                logger.warning("Invalid image format, skipping photo")
+                photo_data = None
+        except Exception as e:
+            logger.warning(f"Image compression failed: {e}, skipping photo")
+            photo_data = None
     
     user = {
         "phone": user_data.phone,
@@ -412,7 +423,16 @@ async def register_user(user_data: UserCreate, _: bool = Depends(auth_rate_limit
         "communities": [],
         "circles": [],
         "fcm_tokens": [],
-        "agreed_rules": []
+        "agreed_rules": [],
+        "sanatan_declaration_agreed": True,  # User agreed during signup
+        "kyc_status": None,  # pending/verified/rejected (only for temple/vendor/organizer roles)
+        "kyc_role": None,  # temple/vendor/organizer
+        "kyc_documents": None,  # Stored KYC documents
+        "privacy_settings": {
+            "read_receipts": True,
+            "online_status": True,
+            "profile_photo": "everyone"
+        }
     }
     
     user_id = await db.create_user(user)
@@ -1193,11 +1213,459 @@ async def get_temples(token_data: dict = Depends(verify_token)):
     return await db.query_documents('temples', limit=20)
 
 
+@api_router.get("/temples/nearby")
+async def get_nearby_temples(lat: float = None, lng: float = None, token_data: dict = Depends(verify_token)):
+    """Get temples, optionally filtered by location"""
+    db = await get_db()
+    temples = await db.query_documents('temples', limit=20)
+    
+    # Add is_following status for each temple
+    user_id = token_data["user_id"]
+    for temple in temples:
+        followers = temple.get('followers', [])
+        temple['is_following'] = user_id in followers
+        temple['follower_count'] = len(followers)
+    
+    return temples
+
+
+@api_router.get("/temples/{temple_id}")
+async def get_temple(temple_id: str, token_data: dict = Depends(verify_token)):
+    """Get temple details"""
+    db = await get_db()
+    temple = await db.get_document('temples', temple_id)
+    if not temple:
+        raise HTTPException(status_code=404, detail="Temple not found")
+    
+    # Add is_following status
+    user_id = token_data["user_id"]
+    followers = temple.get('followers', [])
+    temple['is_following'] = user_id in followers
+    temple['follower_count'] = len(followers)
+    
+    return temple
+
+
+@api_router.post("/temples")
+async def create_temple(data: dict, token_data: dict = Depends(verify_token)):
+    """Create a new temple page (KYC required)"""
+    db = await get_db()
+    user = await db.get_document('users', token_data["user_id"])
+    
+    # Check KYC verification for temple role
+    if user.get('kyc_status') != 'verified' or user.get('kyc_role') != 'temple':
+        raise HTTPException(status_code=403, detail="Only verified temple admins can create temple pages")
+    
+    temple_id = f"temple_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{token_data['user_id'][:8]}"
+    
+    temple_data = {
+        'temple_id': temple_id,
+        'name': data.get('name'),
+        'location': data.get('location', {}),
+        'description': data.get('description', ''),
+        'deity': data.get('deity', ''),
+        'aarti_timings': data.get('aarti_timings', {}),
+        'admin_id': token_data['user_id'],
+        'admin_name': user['name'],
+        'followers': [],
+        'is_verified': True,  # Created by verified temple admin
+        'community_type': 'temple_channel',  # Temple announcement channel
+        'created_at': datetime.utcnow()
+    }
+    
+    doc_id = await db.create_document('temples', temple_data)
+    temple_data['id'] = doc_id
+    
+    logger.info(f"Temple created: {data.get('name')} by {user['name']}")
+    return temple_data
+
+
 @api_router.post("/temples/{temple_id}/follow")
 async def follow_temple(temple_id: str, token_data: dict = Depends(verify_token)):
     db = await get_db()
     await db.array_union_update('temples', temple_id, 'followers', [token_data["user_id"]])
     return {"message": "Now following temple"}
+
+
+@api_router.post("/temples/{temple_id}/unfollow")
+async def unfollow_temple(temple_id: str, token_data: dict = Depends(verify_token)):
+    db = await get_db()
+    await db.array_remove_update('temples', temple_id, 'followers', [token_data["user_id"]])
+    return {"message": "Unfollowed temple"}
+
+
+@api_router.get("/temples/{temple_id}/posts")
+async def get_temple_posts(temple_id: str, token_data: dict = Depends(verify_token)):
+    """Get temple announcement posts"""
+    db = await get_db()
+    chat_id = f"temple_{temple_id}"
+    return await db.get_chat_messages(chat_id, 50)
+
+
+@api_router.post("/temples/{temple_id}/posts")
+async def create_temple_post(temple_id: str, data: dict, token_data: dict = Depends(verify_token)):
+    """Create a temple announcement (temple admin only)"""
+    db = await get_db()
+    user = await db.get_document('users', token_data["user_id"])
+    
+    # Verify temple and admin status
+    temple = await db.get_document('temples', temple_id)
+    if not temple:
+        raise HTTPException(status_code=404, detail="Temple not found")
+    
+    if temple.get('admin_id') != token_data['user_id']:
+        raise HTTPException(status_code=403, detail="Only temple admin can post announcements")
+    
+    chat_id = f"temple_{temple_id}"
+    
+    # Ensure chat exists
+    chat = await db.get_document('chats', chat_id)
+    if not chat:
+        await db.set_document('chats', chat_id, {
+            'type': 'temple_channel',
+            'temple_id': temple_id,
+            'temple_name': temple.get('name'),
+            'admin_id': token_data['user_id']
+        })
+    
+    # Create announcement post
+    post_data = {
+        'sender_id': user['id'],
+        'sender_name': user['name'],
+        'sender_photo': user.get('photo'),
+        'title': data.get('title', ''),
+        'content': data.get('content', ''),
+        'post_type': data.get('post_type', 'announcement'),
+        'created_at': datetime.utcnow().isoformat()
+    }
+    
+    msg_id = await db.add_message_to_chat(chat_id, post_data)
+    post_data['id'] = msg_id
+    
+    logger.info(f"Temple announcement created: {data.get('title')} at {temple.get('name')}")
+    return post_data
+
+
+# =================== KYC SYSTEM ===================
+
+@api_router.get("/kyc/status")
+async def get_kyc_status(token_data: dict = Depends(verify_token)):
+    """Get user's KYC status"""
+    db = await get_db()
+    user = await db.get_document('users', token_data["user_id"])
+    
+    return {
+        "kyc_status": user.get('kyc_status'),  # pending/verified/rejected
+        "kyc_role": user.get('kyc_role'),  # temple/vendor/organizer
+        "submitted_at": user.get('kyc_submitted_at'),
+        "verified_at": user.get('kyc_verified_at'),
+        "rejection_reason": user.get('kyc_rejection_reason')
+    }
+
+
+@api_router.post("/kyc/submit")
+async def submit_kyc(data: dict, token_data: dict = Depends(verify_token)):
+    """
+    Submit KYC documents for verification
+    Required for: temple admins, vendors, event organizers
+    
+    Accepts:
+    - kyc_role: temple/vendor/organizer
+    - id_type: aadhaar or pan
+    - id_number: ID number
+    - selfie_photo: Base64 encoded selfie (for PAN verification)
+    - id_photo: Base64 encoded ID document
+    """
+    from services.image_service import compress_base64_image, is_valid_image
+    
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    kyc_role = data.get('kyc_role')
+    if kyc_role not in ['temple', 'vendor', 'organizer']:
+        raise HTTPException(status_code=400, detail="Invalid KYC role. Must be: temple, vendor, or organizer")
+    
+    id_type = data.get('id_type')
+    if id_type not in ['aadhaar', 'pan']:
+        raise HTTPException(status_code=400, detail="Invalid ID type. Must be: aadhaar or pan")
+    
+    id_number = data.get('id_number', '').strip()
+    if not id_number:
+        raise HTTPException(status_code=400, detail="ID number is required")
+    
+    # Validate ID format
+    if id_type == 'aadhaar' and len(id_number) != 12:
+        raise HTTPException(status_code=400, detail="Aadhaar must be 12 digits")
+    if id_type == 'pan' and len(id_number) != 10:
+        raise HTTPException(status_code=400, detail="PAN must be 10 characters")
+    
+    # Compress photos if provided
+    id_photo = data.get('id_photo')
+    if id_photo and is_valid_image(id_photo):
+        id_photo = compress_base64_image(id_photo, max_size=800, quality=80)
+    
+    selfie_photo = data.get('selfie_photo')
+    if selfie_photo and is_valid_image(selfie_photo):
+        selfie_photo = compress_base64_image(selfie_photo, max_size=512, quality=80)
+    
+    # Store KYC documents (for admin review)
+    kyc_data = {
+        'kyc_status': 'pending',
+        'kyc_role': kyc_role,
+        'kyc_id_type': id_type,
+        'kyc_id_number': id_number,
+        'kyc_id_photo': id_photo,
+        'kyc_selfie_photo': selfie_photo if id_type == 'pan' else None,
+        'kyc_submitted_at': datetime.utcnow().isoformat()
+    }
+    
+    await db.update_document('users', user_id, kyc_data)
+    
+    logger.info(f"KYC submitted for {token_data.get('sl_id')} - role: {kyc_role}")
+    return {"message": "KYC submitted successfully", "status": "pending"}
+
+
+@api_router.post("/admin/kyc/verify/{user_id}")
+async def verify_kyc(user_id: str, data: dict, token_data: dict = Depends(verify_token)):
+    """
+    Admin endpoint to verify or reject KYC
+    data: { action: 'verify' | 'reject', rejection_reason?: string }
+    """
+    db = await get_db()
+    
+    # Check if current user is admin (simple check - in production use proper admin role)
+    admin_user = await db.get_document('users', token_data["user_id"])
+    if 'Admin' not in admin_user.get('badges', []):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    target_user = await db.get_document('users', user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if target_user.get('kyc_status') != 'pending':
+        raise HTTPException(status_code=400, detail="No pending KYC for this user")
+    
+    action = data.get('action')
+    if action == 'verify':
+        kyc_role = target_user.get('kyc_role')
+        badge_map = {
+            'temple': 'Verified Temple',
+            'vendor': 'Verified Vendor',
+            'organizer': 'Verified Organizer'
+        }
+        
+        update_data = {
+            'kyc_status': 'verified',
+            'kyc_verified_at': datetime.utcnow().isoformat(),
+            'is_verified': True
+        }
+        await db.update_document('users', user_id, update_data)
+        
+        # Add verified badge
+        if kyc_role in badge_map:
+            await db.array_union_update('users', user_id, 'badges', [badge_map[kyc_role]])
+        
+        logger.info(f"KYC verified for user {user_id}")
+        return {"message": "KYC verified", "badge_added": badge_map.get(kyc_role)}
+    
+    elif action == 'reject':
+        update_data = {
+            'kyc_status': 'rejected',
+            'kyc_rejection_reason': data.get('rejection_reason', 'Documents not acceptable')
+        }
+        await db.update_document('users', user_id, update_data)
+        
+        logger.info(f"KYC rejected for user {user_id}")
+        return {"message": "KYC rejected"}
+    
+    raise HTTPException(status_code=400, detail="Invalid action")
+
+
+@api_router.get("/admin/kyc/pending")
+async def get_pending_kyc(token_data: dict = Depends(verify_token)):
+    """Get all users with pending KYC (admin only)"""
+    db = await get_db()
+    
+    # Check admin
+    admin_user = await db.get_document('users', token_data["user_id"])
+    if 'Admin' not in admin_user.get('badges', []):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    pending = await db.query_documents('users', filters=[('kyc_status', '==', 'pending')])
+    
+    # Return only necessary fields
+    return [{
+        'id': u['id'],
+        'name': u.get('name'),
+        'sl_id': u.get('sl_id'),
+        'kyc_role': u.get('kyc_role'),
+        'kyc_id_type': u.get('kyc_id_type'),
+        'kyc_submitted_at': u.get('kyc_submitted_at')
+    } for u in pending]
+
+
+# =================== REPORT SYSTEM ===================
+
+@api_router.post("/report")
+async def report_content(data: dict, token_data: dict = Depends(verify_token)):
+    """
+    Report a message or content for moderation
+    
+    data:
+    - content_type: message/user/temple/post
+    - content_id: ID of the content being reported
+    - chat_id: Chat ID (for messages)
+    - category: religious_attack/disrespectful/spam/abuse
+    - description: Optional description
+    """
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    content_type = data.get('content_type')
+    if content_type not in ['message', 'user', 'temple', 'post']:
+        raise HTTPException(status_code=400, detail="Invalid content type")
+    
+    category = data.get('category')
+    valid_categories = ['religious_attack', 'disrespectful', 'spam', 'abuse', 'other']
+    if category not in valid_categories:
+        raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {valid_categories}")
+    
+    report_data = {
+        'reporter_id': user_id,
+        'content_type': content_type,
+        'content_id': data.get('content_id'),
+        'chat_id': data.get('chat_id'),
+        'category': category,
+        'description': data.get('description', ''),
+        'status': 'pending',  # pending/reviewed/resolved/dismissed
+        'created_at': datetime.utcnow()
+    }
+    
+    report_id = await db.create_document('reports', report_data)
+    
+    logger.info(f"Report submitted: {content_type} - {category} by {user_id}")
+    return {"message": "Report submitted", "report_id": report_id}
+
+
+@api_router.get("/admin/reports")
+async def get_reports(status: str = 'pending', token_data: dict = Depends(verify_token)):
+    """Get all reports (admin only)"""
+    db = await get_db()
+    
+    # Check admin
+    admin_user = await db.get_document('users', token_data["user_id"])
+    if 'Admin' not in admin_user.get('badges', []):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    filters = [('status', '==', status)] if status else []
+    reports = await db.query_documents('reports', filters=filters, limit=50)
+    
+    return reports
+
+
+@api_router.post("/admin/reports/{report_id}/resolve")
+async def resolve_report(report_id: str, data: dict, token_data: dict = Depends(verify_token)):
+    """Resolve a report (admin only)"""
+    db = await get_db()
+    
+    # Check admin
+    admin_user = await db.get_document('users', token_data["user_id"])
+    if 'Admin' not in admin_user.get('badges', []):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    action = data.get('action')  # resolved/dismissed
+    if action not in ['resolved', 'dismissed']:
+        raise HTTPException(status_code=400, detail="Invalid action")
+    
+    await db.update_document('reports', report_id, {
+        'status': action,
+        'resolved_by': token_data["user_id"],
+        'resolved_at': datetime.utcnow().isoformat(),
+        'resolution_note': data.get('note', '')
+    })
+    
+    return {"message": f"Report {action}"}
+
+
+# =================== SAMPLE DATA INITIALIZATION ===================
+
+@api_router.post("/admin/init-sample-temples")
+async def init_sample_temples(token_data: dict = Depends(verify_token)):
+    """Initialize sample temple data for beta testing"""
+    db = await get_db()
+    
+    sample_temples = [
+        {
+            'temple_id': 'siddhivinayak_mumbai',
+            'name': 'Shree Siddhivinayak Temple',
+            'location': {'city': 'Mumbai', 'area': 'Prabhadevi', 'state': 'Maharashtra', 'country': 'India'},
+            'description': 'One of the most famous Ganpati temples in Mumbai, known for wish fulfillment.',
+            'deity': 'Lord Ganesha',
+            'aarti_timings': {'morning': '5:30 AM', 'afternoon': '12:00 PM', 'evening': '8:00 PM'},
+            'is_verified': True,
+            'community_type': 'temple_channel',
+            'followers': [],
+            'created_at': datetime.utcnow()
+        },
+        {
+            'temple_id': 'iskcon_mumbai',
+            'name': 'ISKCON Temple Mumbai',
+            'location': {'city': 'Mumbai', 'area': 'Juhu', 'state': 'Maharashtra', 'country': 'India'},
+            'description': 'Beautiful temple dedicated to Lord Krishna with daily bhajans and prasadam.',
+            'deity': 'Lord Krishna',
+            'aarti_timings': {'morning': '4:30 AM', 'afternoon': '1:00 PM', 'evening': '7:00 PM'},
+            'is_verified': True,
+            'community_type': 'temple_channel',
+            'followers': [],
+            'created_at': datetime.utcnow()
+        },
+        {
+            'temple_id': 'mahalaxmi_mumbai',
+            'name': 'Mahalaxmi Temple',
+            'location': {'city': 'Mumbai', 'area': 'Mahalaxmi', 'state': 'Maharashtra', 'country': 'India'},
+            'description': 'Ancient temple dedicated to Goddess Mahalaxmi, Mahakali and Mahasaraswati.',
+            'deity': 'Goddess Mahalaxmi',
+            'aarti_timings': {'morning': '6:00 AM', 'evening': '8:30 PM'},
+            'is_verified': True,
+            'community_type': 'temple_channel',
+            'followers': [],
+            'created_at': datetime.utcnow()
+        },
+        {
+            'temple_id': 'shirdi_sai',
+            'name': 'Shirdi Sai Baba Temple',
+            'location': {'city': 'Shirdi', 'area': 'Shirdi', 'state': 'Maharashtra', 'country': 'India'},
+            'description': 'The holy shrine of Sai Baba, visited by millions of devotees annually.',
+            'deity': 'Sai Baba',
+            'aarti_timings': {'kakad': '4:30 AM', 'madhyan': '12:00 PM', 'dhoop': '6:00 PM', 'shej': '10:30 PM'},
+            'is_verified': True,
+            'community_type': 'temple_channel',
+            'followers': [],
+            'created_at': datetime.utcnow()
+        },
+        {
+            'temple_id': 'tirupati',
+            'name': 'Tirumala Venkateswara Temple',
+            'location': {'city': 'Tirupati', 'area': 'Tirumala', 'state': 'Andhra Pradesh', 'country': 'India'},
+            'description': 'The richest and most visited temple in the world, dedicated to Lord Venkateswara.',
+            'deity': 'Lord Venkateswara',
+            'aarti_timings': {'suprabhatam': '3:00 AM', 'thomala': '2:00 PM', 'ekantha': '1:00 AM'},
+            'is_verified': True,
+            'community_type': 'temple_channel',
+            'followers': [],
+            'created_at': datetime.utcnow()
+        }
+    ]
+    
+    created = 0
+    for temple in sample_temples:
+        existing = await db.find_one('temples', [('temple_id', '==', temple['temple_id'])])
+        if not existing:
+            await db.create_document('temples', temple)
+            created += 1
+    
+    logger.info(f"Initialized {created} sample temples")
+    return {"message": f"Created {created} sample temples", "total": len(sample_temples)}
 
 
 # =================== EVENTS ===================
