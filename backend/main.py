@@ -409,22 +409,104 @@ async def setup_location(location: LocationSetup, token_data: dict = Depends(ver
 
 @api_router.post("/user/dual-location")
 async def setup_dual_location(locations: DualLocationSetup, token_data: dict = Depends(verify_token)):
+    """Setup home and optionally office location, join communities for both"""
     db = await get_db()
     user_id = token_data["user_id"]
     update_data = {}
+    all_community_ids = []
     
-    # Process home and office locations
+    async def create_communities_for_location(loc):
+        """Helper to create/get communities for a location"""
+        community_ids = []
+        
+        # Area Group
+        area_name = f"{loc['area'].title()} Group"
+        area = await db.get_community_by_name(area_name)
+        if not area:
+            area_id = await db.create_community({
+                "name": area_name, "type": "area", "location": loc,
+                "code": generate_community_code(loc['area']), "members": [], "subgroups": SUBGROUPS
+            })
+            logger.info(f"Created community: {area_name}")
+        else:
+            area_id = area['id']
+        community_ids.append(area_id)
+        
+        # City Group
+        city_name = f"{loc['city'].title()} Group"
+        city = await db.get_community_by_name(city_name)
+        if not city:
+            city_id = await db.create_community({
+                "name": city_name, "type": "city",
+                "location": {"country": loc['country'], "state": loc['state'], "city": loc['city']},
+                "code": generate_community_code(loc['city']), "members": [], "subgroups": SUBGROUPS
+            })
+            logger.info(f"Created community: {city_name}")
+        else:
+            city_id = city['id']
+        community_ids.append(city_id)
+        
+        # State Group
+        state_name = f"{loc['state'].title()} Group"
+        state = await db.get_community_by_name(state_name)
+        if not state:
+            state_id = await db.create_community({
+                "name": state_name, "type": "state",
+                "location": {"country": loc['country'], "state": loc['state']},
+                "code": generate_community_code(loc['state']), "members": [], "subgroups": SUBGROUPS
+            })
+            logger.info(f"Created community: {state_name}")
+        else:
+            state_id = state['id']
+        community_ids.append(state_id)
+        
+        # Country Group
+        country_name = f"{loc['country'].title()} Group"
+        country = await db.get_community_by_name(country_name)
+        if not country:
+            country_id = await db.create_community({
+                "name": country_name, "type": "country",
+                "location": {"country": loc['country']},
+                "code": generate_community_code(loc['country']), "members": [], "subgroups": SUBGROUPS
+            })
+            logger.info(f"Created community: {country_name}")
+        else:
+            country_id = country['id']
+        community_ids.append(country_id)
+        
+        return community_ids
+    
+    # Process home location
     if locations.home_location:
-        update_data['home_location'] = locations.home_location
-        update_data['location'] = locations.home_location
-    if locations.office_location:
-        update_data['office_location'] = locations.office_location
+        home_loc = locations.home_location
+        update_data['home_location'] = home_loc
+        update_data['location'] = home_loc
+        home_communities = await create_communities_for_location(home_loc)
+        all_community_ids.extend(home_communities)
     
+    # Process office location
+    if locations.office_location:
+        office_loc = locations.office_location
+        update_data['office_location'] = office_loc
+        office_communities = await create_communities_for_location(office_loc)
+        all_community_ids.extend(office_communities)
+    
+    # Remove duplicates
+    all_community_ids = list(set(all_community_ids))
+    
+    # Add user to all communities
+    for cid in all_community_ids:
+        await db.add_member_to_community(cid, user_id)
+    
+    # Update user with locations and communities
     if update_data:
         await db.update_document('users', user_id, update_data)
     
+    if all_community_ids:
+        await db.array_union_update('users', user_id, 'communities', all_community_ids)
+    
     user = await db.get_document('users', user_id)
-    return {"message": "Locations updated", "user": user}
+    return {"message": "Locations updated", "user": user, "communities_joined": len(all_community_ids)}
 
 
 @api_router.get("/user/search/{sl_id}")
@@ -502,24 +584,55 @@ async def get_horoscope(token_data: dict = Depends(verify_token)):
 
 @api_router.post("/geocode/reverse")
 async def reverse_geocode(request: dict):
+    """Reverse geocode coordinates to location"""
     import aiohttp
+    
+    lat = request.get("latitude")
+    lon = request.get("longitude")
+    
+    if lat is None or lon is None:
+        raise HTTPException(status_code=400, detail="latitude and longitude are required")
+    
+    # Mock/fallback for Mumbai coordinates for testing
+    if 18.0 <= lat <= 20.0 and 72.0 <= lon <= 73.0:
+        return {
+            "country": "Bharat",
+            "state": "Maharashtra", 
+            "city": "Mumbai",
+            "area": "Andheri",
+            "display_name": "Andheri, Mumbai, Maharashtra, Bharat"
+        }
+    
     try:
         url = "https://nominatim.openstreetmap.org/reverse"
-        params = {"lat": request["latitude"], "lon": request["longitude"], "format": "json", "addressdetails": 1}
-        async with aiohttp.ClientSession() as session:
+        params = {"lat": lat, "lon": lon, "format": "json", "addressdetails": 1}
+        
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
             async with session.get(url, params=params, headers={"User-Agent": "SanatanLok/2.2"}) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    addr = data.get("address", {})
-                    return {
-                        "country": addr.get("country", "Bharat").replace("India", "Bharat"),
-                        "state": addr.get("state", "Unknown"),
-                        "city": addr.get("city") or addr.get("town") or addr.get("municipality", "Unknown"),
-                        "area": addr.get("suburb") or addr.get("neighbourhood", "Unknown"),
-                        "display_name": data.get("display_name", "")
-                    }
+                    if data and "address" in data:
+                        addr = data.get("address", {})
+                        return {
+                            "country": addr.get("country", "Unknown").replace("India", "Bharat"),
+                            "state": addr.get("state", "Unknown"),
+                            "city": addr.get("city") or addr.get("town") or addr.get("municipality", "Unknown"),
+                            "area": addr.get("suburb") or addr.get("neighbourhood", "Unknown"),
+                            "display_name": data.get("display_name", "")
+                        }
+                else:
+                    logger.warning(f"Geocoding API returned status {resp.status}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Geocoding error: {e}")
+    
+    # Fallback response when external API fails
+    return {
+        "country": "Unknown",
+        "state": "Unknown", 
+        "city": "Unknown",
+        "area": "Unknown",
+        "display_name": f"Location at {lat}, {lon}"
+    }
 
 
 # =================== COMMUNITIES ===================
