@@ -1,50 +1,70 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  FlatList, 
+  TouchableOpacity, 
+  ActivityIndicator, 
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  RefreshControl,
+  ScrollView
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getCommunity, agreeToRules } from '../../src/services/api';
+import { getCommunity, getCommunityMessages, sendCommunityMessage } from '../../src/services/api';
 import { useAuthStore } from '../../src/store/authStore';
-import { Community, Subgroup } from '../../src/types';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
+import { Avatar } from '../../src/components/Avatar';
+import { RequestFormModal } from '../../src/components/RequestFormModal';
 
-const SUBGROUP_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
-  chat: 'chatbubbles',
-  political: 'megaphone',
-  marketplace: 'storefront',
-  festival: 'sparkles',
-  events: 'calendar',
-  volunteers: 'hand-left',
-  invitations: 'mail',
-  help: 'medkit',
-};
+const TABS = ['Chat', 'Help', 'Blood', 'Medical', 'Financial', 'Petition'];
 
-const SUBGROUP_COLORS: Record<string, string> = {
-  chat: COLORS.info,
-  political: COLORS.warning,
-  marketplace: COLORS.success,
-  festival: '#9C27B0',
-  events: COLORS.primary,
-  volunteers: '#00BCD4',
-  invitations: '#E91E63',
-  help: COLORS.error,
-};
+interface Message {
+  id: string;
+  content: string;
+  sender_id: string;
+  sender_name: string;
+  sender_photo?: string;
+  created_at: string;
+  message_type?: string;
+}
+
+interface Community {
+  id: string;
+  name: string;
+  member_count: number;
+  code: string;
+}
 
 export default function CommunityDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { user, updateUser } = useAuthStore();
+  const { user } = useAuthStore();
+  const flatListRef = useRef<FlatList>(null);
   
   const [community, setCommunity] = useState<Community | null>(null);
+  const [activeTab, setActiveTab] = useState('Chat');
+  const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
-  const [rulesModal, setRulesModal] = useState<{ visible: boolean; subgroup: Subgroup | null }>({
-    visible: false,
-    subgroup: null,
-  });
+  const [refreshing, setRefreshing] = useState(false);
+  const [newMessage, setNewMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestType, setRequestType] = useState<'Help' | 'Blood' | 'Medical' | 'Financial' | 'Petition'>('Help');
 
   useEffect(() => {
     fetchCommunity();
   }, [id]);
+
+  useEffect(() => {
+    if (community) {
+      fetchMessages();
+    }
+  }, [activeTab, community]);
 
   const fetchCommunity = async () => {
     try {
@@ -57,52 +77,100 @@ export default function CommunityDetailScreen() {
     }
   };
 
-  const hasAgreedToRules = (subgroupType: string) => {
-    return user?.agreed_rules?.includes(`${id}_${subgroupType}`);
-  };
-
-  const handleSubgroupPress = (subgroup: Subgroup) => {
-    if (hasAgreedToRules(subgroup.type)) {
-      router.push(`/chat/community/${id}?subgroup=${subgroup.type}&name=${encodeURIComponent(subgroup.name)}`);
-    } else {
-      setRulesModal({ visible: true, subgroup });
-    }
-  };
-
-  const handleAgreeRules = async () => {
-    if (!rulesModal.subgroup) return;
-    
+  const fetchMessages = async () => {
     try {
-      await agreeToRules(id!, rulesModal.subgroup.type);
-      const newAgreedRules = [...(user?.agreed_rules || []), `${id}_${rulesModal.subgroup.type}`];
-      updateUser({ agreed_rules: newAgreedRules } as any);
-      setRulesModal({ visible: false, subgroup: null });
-      router.push(`/chat/community/${id}?subgroup=${rulesModal.subgroup.type}&name=${encodeURIComponent(rulesModal.subgroup.name)}`);
+      const subgroupType = activeTab.toLowerCase();
+      const response = await getCommunityMessages(id!, subgroupType);
+      setMessages(response.data || []);
     } catch (error) {
-      console.error('Error agreeing to rules:', error);
+      console.error('Error fetching messages:', error);
+      setMessages([]);
+    } finally {
+      setRefreshing(false);
     }
   };
 
-  const renderSubgroup = ({ item }: { item: Subgroup }) => (
-    <TouchableOpacity
-      style={styles.subgroupCard}
-      onPress={() => handleSubgroupPress(item)}
-      activeOpacity={0.7}
-    >
-      <View style={[styles.iconContainer, { backgroundColor: `${SUBGROUP_COLORS[item.type]}20` }]}>
-        <Ionicons
-          name={SUBGROUP_ICONS[item.type] || 'chatbubble'}
-          size={24}
-          color={SUBGROUP_COLORS[item.type] || COLORS.primary}
-        />
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || sending) return;
+    
+    setSending(true);
+    try {
+      const subgroupType = activeTab.toLowerCase();
+      await sendCommunityMessage(id!, subgroupType, newMessage.trim());
+      setNewMessage('');
+      fetchMessages();
+    } catch (error) {
+      console.error('Error sending message:', error);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleAddRequest = () => {
+    if (activeTab === 'Chat') return;
+    setRequestType(activeTab as any);
+    setShowRequestModal(true);
+  };
+
+  const handleSubmitRequest = async (data: any) => {
+    // Submit as a message to the community
+    const subgroupType = activeTab.toLowerCase();
+    const content = formatRequestAsMessage(data);
+    await sendCommunityMessage(id!, subgroupType, content, 'request');
+    fetchMessages();
+  };
+
+  const formatRequestAsMessage = (data: any) => {
+    let message = `📢 ${data.type?.toUpperCase()} REQUEST\n`;
+    if (data.title) message += `\n📌 ${data.title}`;
+    if (data.blood_group) message += `\n🩸 Blood Group: ${data.blood_group}`;
+    if (data.hospital_name) message += `\n🏥 Hospital: ${data.hospital_name}`;
+    if (data.location) message += `\n📍 Location: ${data.location}`;
+    if (data.amount) message += `\n💰 Amount: ₹${data.amount}`;
+    message += `\n\n${data.description}`;
+    message += `\n\n📞 Contact: ${data.contact_number}`;
+    return message;
+  };
+
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const renderMessage = ({ item }: { item: Message }) => {
+    const isOwnMessage = item.sender_id === user?.id;
+    
+    return (
+      <View style={[
+        styles.messageContainer,
+        isOwnMessage ? styles.ownMessageContainer : styles.otherMessageContainer
+      ]}>
+        {!isOwnMessage && (
+          <Avatar name={item.sender_name} photo={item.sender_photo} size={32} />
+        )}
+        <View style={[
+          styles.messageBubble,
+          isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble
+        ]}>
+          {!isOwnMessage && (
+            <Text style={styles.senderName}>{item.sender_name}</Text>
+          )}
+          <Text style={[
+            styles.messageText,
+            isOwnMessage && styles.ownMessageText
+          ]}>
+            {item.content}
+          </Text>
+          <Text style={[
+            styles.messageTime,
+            isOwnMessage && styles.ownMessageTime
+          ]}>
+            {formatTime(item.created_at)}
+          </Text>
+        </View>
       </View>
-      <View style={styles.subgroupInfo}>
-        <Text style={styles.subgroupName}>{item.name}</Text>
-        <Text style={styles.subgroupRules} numberOfLines={1}>{item.rules}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
-    </TouchableOpacity>
-  );
+    );
+  };
 
   if (loading) {
     return (
@@ -114,14 +182,16 @@ export default function CommunityDetailScreen() {
 
   if (!community) {
     return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>Community not found</Text>
-      </View>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Community not found</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -137,62 +207,97 @@ export default function CommunityDetailScreen() {
         </View>
       </View>
 
-      {/* Subgroups */}
-      <FlatList
-        data={community.subgroups}
-        renderItem={renderSubgroup}
-        keyExtractor={(item) => item.type}
-        contentContainerStyle={styles.listContent}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
-      />
-
-      {/* Floating Rules Button */}
-      <TouchableOpacity
-        style={styles.floatingButton}
-        onPress={() => setRulesModal({ visible: true, subgroup: null })}
-      >
-        <Ionicons name="book" size={24} color={COLORS.textWhite} />
-      </TouchableOpacity>
-
-      {/* Rules Modal */}
-      <Modal
-        visible={rulesModal.visible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setRulesModal({ visible: false, subgroup: null })}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {rulesModal.subgroup ? `${rulesModal.subgroup.name} Rules` : 'Community Rules'}
+      {/* Top Tabs */}
+      <View style={styles.tabsContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll}>
+          {TABS.map((tab) => (
+            <TouchableOpacity
+              key={tab}
+              style={[styles.tab, activeTab === tab && styles.tabActive]}
+              onPress={() => setActiveTab(tab)}
+            >
+              <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+                {tab}
               </Text>
-              <TouchableOpacity onPress={() => setRulesModal({ visible: false, subgroup: null })}>
-                <Ionicons name="close" size={24} color={COLORS.text} />
-              </TouchableOpacity>
-            </View>
-            
-            <View style={styles.rulesContainer}>
-              {rulesModal.subgroup ? (
-                <Text style={styles.rulesText}>{rulesModal.subgroup.rules}</Text>
-              ) : (
-                community.subgroups.map((sg) => (
-                  <View key={sg.type} style={styles.ruleItem}>
-                    <Text style={styles.ruleTitle}>{sg.name}</Text>
-                    <Text style={styles.ruleText}>{sg.rules}</Text>
-                  </View>
-                ))
-              )}
-            </View>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+        {activeTab !== 'Chat' && (
+          <TouchableOpacity style={styles.addButton} onPress={handleAddRequest}>
+            <Ionicons name="add" size={24} color={COLORS.primary} />
+          </TouchableOpacity>
+        )}
+      </View>
 
-            {rulesModal.subgroup && !hasAgreedToRules(rulesModal.subgroup.type) && (
-              <TouchableOpacity style={styles.agreeButton} onPress={handleAgreeRules}>
-                <Text style={styles.agreeButtonText}>I Agree</Text>
-              </TouchableOpacity>
+      {/* Messages List */}
+      <KeyboardAvoidingView 
+        style={styles.chatContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.messagesList}
+          inverted={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchMessages(); }} />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Ionicons 
+                name={activeTab === 'Chat' ? 'chatbubbles-outline' : 'document-text-outline'} 
+                size={48} 
+                color={COLORS.textLight} 
+              />
+              <Text style={styles.emptyText}>
+                {activeTab === 'Chat' 
+                  ? 'No messages yet. Start the conversation!' 
+                  : `No ${activeTab.toLowerCase()} requests yet`}
+              </Text>
+            </View>
+          }
+          onContentSizeChange={() => {
+            if (messages.length > 0) {
+              flatListRef.current?.scrollToEnd({ animated: false });
+            }
+          }}
+        />
+
+        {/* Input Area */}
+        <View style={styles.inputContainer}>
+          <TextInput
+            style={styles.textInput}
+            placeholder={activeTab === 'Chat' ? 'Type a message...' : `Post a ${activeTab.toLowerCase()} request...`}
+            placeholderTextColor={COLORS.textLight}
+            value={newMessage}
+            onChangeText={setNewMessage}
+            multiline
+            maxLength={1000}
+          />
+          <TouchableOpacity 
+            style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}
+            onPress={handleSendMessage}
+            disabled={!newMessage.trim() || sending}
+          >
+            {sending ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Ionicons name="send" size={20} color="#FFFFFF" />
             )}
-          </View>
+          </TouchableOpacity>
         </View>
-      </Modal>
+      </KeyboardAvoidingView>
+
+      {/* Request Form Modal */}
+      <RequestFormModal
+        visible={showRequestModal}
+        onClose={() => setShowRequestModal(false)}
+        requestType={requestType}
+        onSubmit={handleSubmitRequest}
+      />
     </SafeAreaView>
   );
 }
@@ -254,109 +359,134 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.primary,
   },
-  listContent: {
-    padding: SPACING.md,
-  },
-  subgroupCard: {
+  tabsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+    paddingVertical: SPACING.sm,
   },
-  iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: BORDER_RADIUS.md,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: SPACING.md,
-  },
-  subgroupInfo: {
+  tabsScroll: {
     flex: 1,
   },
-  subgroupName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 4,
+  tab: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    marginLeft: SPACING.sm,
+    borderRadius: 20,
   },
-  subgroupRules: {
-    fontSize: 12,
+  tabActive: {
+    backgroundColor: `${COLORS.primary}15`,
+  },
+  tabText: {
+    fontSize: 14,
     color: COLORS.textSecondary,
+    fontWeight: '500',
   },
-  separator: {
-    height: SPACING.sm,
+  tabTextActive: {
+    color: COLORS.primary,
+    fontWeight: '600',
   },
-  floatingButton: {
-    position: 'absolute',
-    bottom: SPACING.lg,
-    right: SPACING.lg,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
+  addButton: {
+    padding: SPACING.sm,
+    marginRight: SPACING.sm,
   },
-  modalOverlay: {
+  chatContainer: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  messagesList: {
+    padding: SPACING.md,
+    flexGrow: 1,
+  },
+  messageContainer: {
+    flexDirection: 'row',
+    marginBottom: SPACING.md,
+    alignItems: 'flex-end',
+  },
+  ownMessageContainer: {
     justifyContent: 'flex-end',
   },
-  modalContent: {
+  otherMessageContainer: {
+    justifyContent: 'flex-start',
+  },
+  messageBubble: {
+    maxWidth: '75%',
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    marginHorizontal: SPACING.xs,
+  },
+  ownMessageBubble: {
+    backgroundColor: COLORS.primary,
+    borderBottomRightRadius: 4,
+  },
+  otherMessageBubble: {
     backgroundColor: COLORS.surface,
-    borderTopLeftRadius: BORDER_RADIUS.xl,
-    borderTopRightRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-    maxHeight: '80%',
+    borderBottomLeftRadius: 4,
   },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.lg,
-  },
-  modalTitle: {
-    fontSize: 20,
+  senderName: {
+    fontSize: 12,
     fontWeight: '600',
-    color: COLORS.text,
-  },
-  rulesContainer: {
-    marginBottom: SPACING.lg,
-  },
-  rulesText: {
-    fontSize: 14,
-    color: COLORS.text,
-    lineHeight: 22,
-  },
-  ruleItem: {
-    marginBottom: SPACING.md,
-  },
-  ruleTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text,
+    color: COLORS.primary,
     marginBottom: 4,
   },
-  ruleText: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
+  messageText: {
+    fontSize: 15,
+    color: COLORS.text,
+    lineHeight: 20,
   },
-  agreeButton: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
+  ownMessageText: {
+    color: '#FFFFFF',
+  },
+  messageTime: {
+    fontSize: 10,
+    color: COLORS.textLight,
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
+  ownMessageTime: {
+    color: 'rgba(255,255,255,0.7)',
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: SPACING.xl * 3,
   },
-  agreeButtonText: {
-    color: COLORS.textWhite,
-    fontSize: 16,
-    fontWeight: '600',
+  emptyText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.md,
+    textAlign: 'center',
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    padding: SPACING.md,
+    backgroundColor: COLORS.surface,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.divider,
+  },
+  textInput: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    borderRadius: 20,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    maxHeight: 100,
+    fontSize: 15,
+    color: COLORS.text,
+  },
+  sendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: SPACING.sm,
+  },
+  sendButtonDisabled: {
+    backgroundColor: COLORS.textLight,
   },
 });

@@ -1,5 +1,14 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  FlatList, 
+  TouchableOpacity, 
+  RefreshControl, 
+  ActivityIndicator,
+  Modal 
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { getConversations } from '../../src/services/api';
@@ -20,6 +29,7 @@ export default function MessagesScreen() {
   const [conversations, setConversations] = useState<ConversationWithStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
 
   const fetchConversations = useCallback(async () => {
     try {
@@ -72,6 +82,23 @@ export default function MessagesScreen() {
     return <Ionicons name="checkmark" size={16} color={COLORS.textLight} style={styles.statusIcon} />;
   };
 
+  const handleCreateOption = (option: string) => {
+    setShowCreateMenu(false);
+    switch (option) {
+      case 'message':
+        router.push('/dm/new');
+        break;
+      case 'group':
+        // TODO: Implement group creation
+        alert('Group creation coming soon!');
+        break;
+      case 'circle':
+        // TODO: Navigate to circle creation
+        alert('Circle creation coming soon!');
+        break;
+    }
+  };
+
   const renderConversation = ({ item }: { item: ConversationWithStatus }) => {
     // Check if the last message was sent by current user
     const isSentByMe = item.last_message_sender_id === user?.id;
@@ -116,22 +143,32 @@ export default function MessagesScreen() {
 
   return (
     <View style={styles.container}>
-      {/* New Message Button */}
-      <TouchableOpacity
-        style={styles.newMessageButton}
-        onPress={() => router.push('/dm/new')}
-      >
-        <Ionicons name="create" size={20} color={COLORS.textWhite} />
-        <Text style={styles.newMessageText}>New Message</Text>
-      </TouchableOpacity>
+      {/* Header with + Create Button */}
+      <View style={styles.headerContainer}>
+        <Text style={styles.headerTitle}>Messages</Text>
+        <TouchableOpacity 
+          style={styles.createButton}
+          onPress={() => setShowCreateMenu(true)}
+        >
+          <Ionicons name="add" size={20} color={COLORS.primary} />
+          <Text style={styles.createButtonText}>Create</Text>
+        </TouchableOpacity>
+      </View>
 
       {conversations.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Ionicons name="chatbubbles-outline" size={64} color={COLORS.textLight} />
           <Text style={styles.emptyTitle}>No Messages Yet</Text>
           <Text style={styles.emptyText}>
-            Start a conversation by entering someone's Sanatan Lok ID
+            Start a conversation by entering someone's Brahmand ID
           </Text>
+          <TouchableOpacity 
+            style={styles.startChatButton}
+            onPress={() => router.push('/dm/new')}
+          >
+            <Ionicons name="add-circle" size={20} color="#FFFFFF" />
+            <Text style={styles.startChatText}>New Message</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <FlatList
@@ -145,6 +182,61 @@ export default function MessagesScreen() {
           ItemSeparatorComponent={() => <View style={styles.separator} />}
         />
       )}
+
+      {/* Create Menu Modal */}
+      <Modal
+        visible={showCreateMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowCreateMenu(false)}
+      >
+        <TouchableOpacity 
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={() => setShowCreateMenu(false)}
+        >
+          <View style={styles.menuContent}>
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => handleCreateOption('message')}
+            >
+              <View style={[styles.menuIconBg, { backgroundColor: `${COLORS.primary}15` }]}>
+                <Ionicons name="chatbubble" size={20} color={COLORS.primary} />
+              </View>
+              <View style={styles.menuItemInfo}>
+                <Text style={styles.menuItemTitle}>New Message</Text>
+                <Text style={styles.menuItemSubtitle}>Start a private conversation</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => handleCreateOption('group')}
+            >
+              <View style={[styles.menuIconBg, { backgroundColor: `${COLORS.success}15` }]}>
+                <Ionicons name="people" size={20} color={COLORS.success} />
+              </View>
+              <View style={styles.menuItemInfo}>
+                <Text style={styles.menuItemTitle}>Create Group</Text>
+                <Text style={styles.menuItemSubtitle}>Chat with multiple people</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => handleCreateOption('circle')}
+            >
+              <View style={[styles.menuIconBg, { backgroundColor: `${COLORS.info}15` }]}>
+                <Ionicons name="ellipse-outline" size={20} color={COLORS.info} />
+              </View>
+              <View style={styles.menuItemInfo}>
+                <Text style={styles.menuItemTitle}>Create Circle</Text>
+                <Text style={styles.menuItemSubtitle}>Create a trusted circle</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -160,24 +252,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.background,
   },
-  newMessageButton: {
+  headerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.primary,
-    marginHorizontal: SPACING.md,
-    marginVertical: SPACING.md,
-    paddingVertical: SPACING.sm + 2,
-    borderRadius: BORDER_RADIUS.md,
+    justifyContent: 'space-between',
+    padding: SPACING.md,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
   },
-  newMessageText: {
-    color: COLORS.textWhite,
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  createButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.primary}15`,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: 20,
+  },
+  createButtonText: {
+    color: COLORS.primary,
     fontWeight: '600',
-    marginLeft: SPACING.xs,
+    marginLeft: 4,
   },
   listContent: {
     padding: SPACING.md,
-    paddingTop: 0,
   },
   conversationCard: {
     flexDirection: 'row',
@@ -243,5 +346,60 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     textAlign: 'center',
+    marginBottom: SPACING.lg,
+  },
+  startChatButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  startChatText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    marginLeft: SPACING.xs,
+  },
+  // Menu Modal
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuContent: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    width: '85%',
+    maxWidth: 340,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  menuIconBg: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.md,
+  },
+  menuItemInfo: {
+    flex: 1,
+  },
+  menuItemTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  menuItemSubtitle: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 2,
   },
 });
