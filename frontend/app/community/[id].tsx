@@ -10,12 +10,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
-  ScrollView
+  ScrollView,
+  Alert
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getCommunity, getCommunityMessages, sendCommunityMessage } from '../../src/services/api';
+import { getCommunity, getCommunityMessages, sendCommunityMessage, createHelpRequest } from '../../src/services/api';
 import { useAuthStore } from '../../src/store/authStore';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 import { Avatar } from '../../src/components/Avatar';
@@ -113,11 +114,43 @@ export default function CommunityDetailScreen() {
   };
 
   const handleSubmitRequest = async (data: any) => {
-    // Submit as a message to the community
-    const subgroupType = activeTab.toLowerCase();
-    const content = formatRequestAsMessage(data);
-    await sendCommunityMessage(id!, subgroupType, content, 'request');
-    fetchMessages();
+    try {
+      // Map request type to API format
+      const typeMapping: Record<string, string> = {
+        'help': 'other',
+        'blood': 'blood',
+        'medical': 'medical',
+        'financial': 'financial',
+        'petition': 'other',
+        'food': 'food'
+      };
+      
+      const helpType = typeMapping[data.type?.toLowerCase()] || 'other';
+      
+      // Create help request via API
+      await createHelpRequest({
+        type: helpType as any,
+        title: data.title || `${activeTab} Request`,
+        description: data.description,
+        community_level: (data.visibility === 'national' ? 'country' : data.visibility) as any,
+        contact_number: data.contact_number,
+        urgency: 'normal',
+        blood_group: data.blood_group,
+        hospital_name: data.hospital_name,
+        amount: data.amount
+      });
+      
+      // Also post as a message to the community for visibility
+      const subgroupType = activeTab.toLowerCase();
+      const content = formatRequestAsMessage(data);
+      await sendCommunityMessage(id!, subgroupType, content, 'request');
+      
+      Alert.alert('Success', 'Your help request has been submitted!');
+      fetchMessages();
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.detail || 'Failed to submit request');
+      throw error;
+    }
   };
 
   const formatRequestAsMessage = (data: any) => {
@@ -266,29 +299,40 @@ export default function CommunityDetailScreen() {
           }}
         />
 
-        {/* Input Area */}
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.textInput}
-            placeholder={activeTab === 'Chat' ? 'Type a message...' : `Post a ${activeTab.toLowerCase()} request...`}
-            placeholderTextColor={COLORS.textLight}
-            value={newMessage}
-            onChangeText={setNewMessage}
-            multiline
-            maxLength={1000}
-          />
-          <TouchableOpacity 
-            style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}
-            onPress={handleSendMessage}
-            disabled={!newMessage.trim() || sending}
-          >
-            {sending ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Ionicons name="send" size={20} color="#FFFFFF" />
-            )}
-          </TouchableOpacity>
-        </View>
+        {/* Input Area - Only show for Chat tab */}
+        {activeTab === 'Chat' && (
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.textInput}
+              placeholder="Type a message..."
+              placeholderTextColor={COLORS.textLight}
+              value={newMessage}
+              onChangeText={setNewMessage}
+              multiline
+              maxLength={1000}
+            />
+            <TouchableOpacity 
+              style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}
+              onPress={handleSendMessage}
+              disabled={!newMessage.trim() || sending}
+            >
+              {sending ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons name="send" size={20} color="#FFFFFF" />
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Help Request Prompt - Show for non-Chat tabs */}
+        {activeTab !== 'Chat' && messages.length === 0 && (
+          <View style={styles.helpRequestPrompt}>
+            <Text style={styles.helpPromptText}>
+              Need {activeTab.toLowerCase()} help? Tap the + button above to create a structured request.
+            </Text>
+          </View>
+        )}
       </KeyboardAvoidingView>
 
       {/* Request Form Modal */}
@@ -488,5 +532,18 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     backgroundColor: COLORS.textLight,
+  },
+  helpRequestPrompt: {
+    padding: SPACING.md,
+    backgroundColor: `${COLORS.primary}10`,
+    borderRadius: BORDER_RADIUS.md,
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  helpPromptText: {
+    fontSize: 13,
+    color: COLORS.primary,
+    textAlign: 'center',
+    lineHeight: 18,
   },
 });

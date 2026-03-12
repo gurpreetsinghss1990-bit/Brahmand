@@ -119,8 +119,9 @@ export default function VendorScreen() {
     Linking.openURL(`tel:${phone}`);
   };
 
-  const getVendorIcon = (vendorCategories: string[]) => {
-    const category = vendorCategories[0]?.toLowerCase() || '';
+  const getVendorIcon = (vendorCategories?: string[]) => {
+    const cats = vendorCategories || [];
+    const category = cats[0]?.toLowerCase() || '';
     if (category.includes('pooja') || category.includes('pandit')) return 'flower';
     if (category.includes('grocery') || category.includes('sweets')) return 'basket';
     if (category.includes('restaurant') || category.includes('catering')) return 'restaurant';
@@ -130,6 +131,8 @@ export default function VendorScreen() {
   };
 
   const renderVendor = ({ item }: { item: Vendor }) => {
+    const vendorCategories = item?.categories || [];
+    
     return (
       <TouchableOpacity 
         style={styles.vendorCard}
@@ -143,25 +146,27 @@ export default function VendorScreen() {
             </View>
           ) : (
             <View style={styles.vendorImagePlaceholder}>
-              <Ionicons name={getVendorIcon(item.categories) as any} size={28} color={COLORS.primary} />
+              <Ionicons name={getVendorIcon(vendorCategories) as any} size={28} color={COLORS.primary} />
             </View>
           )}
         </View>
 
         <View style={styles.vendorInfo}>
-          <Text style={styles.vendorName}>{item.business_name}</Text>
+          <Text style={styles.vendorName}>{item.business_name || 'Unnamed Business'}</Text>
           
           {/* Categories */}
-          <View style={styles.categoriesRow}>
-            {item.categories.slice(0, 2).map((cat, idx) => (
-              <View key={idx} style={styles.categoryBadge}>
-                <Text style={styles.categoryBadgeText}>{cat}</Text>
-              </View>
-            ))}
-            {item.categories.length > 2 && (
-              <Text style={styles.moreCats}>+{item.categories.length - 2}</Text>
-            )}
-          </View>
+          {vendorCategories.length > 0 && (
+            <View style={styles.categoriesRow}>
+              {vendorCategories.slice(0, 2).map((cat, idx) => (
+                <View key={idx} style={styles.categoryBadge}>
+                  <Text style={styles.categoryBadgeText}>{cat}</Text>
+                </View>
+              ))}
+              {vendorCategories.length > 2 && (
+                <Text style={styles.moreCats}>+{vendorCategories.length - 2}</Text>
+              )}
+            </View>
+          )}
           
           {/* Distance */}
           {item.distance !== undefined && item.distance !== null && (

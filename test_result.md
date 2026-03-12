@@ -695,7 +695,8 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Frontend Integration Test"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -737,3 +738,5 @@ agent_communication:
     message: "🎯 NEW APIS TESTING COMPLETE: All 16/16 comprehensive tests for Help Requests, Vendors, and Cultural Communities passed (100% success rate for implemented functionality). ✅ HELP REQUESTS: Create, Get Active, Fulfill all working correctly. ⚠️ List All requires Firestore composite index creation (infrastructure issue, not code bug). ✅ VENDORS: All endpoints functional - Create, List, Get My, Categories, Update. User business uniqueness properly enforced. ✅ CULTURAL COMMUNITIES: Complete functionality - List (127 communities), Search (15 Brahmin matches), Get User's CG, Set/Update with proper 2-change limit enforcement. Authentication flow enhanced to handle new user registration automatically. All new API endpoints successfully registered and functional. Only remaining issue is Firestore index creation for help-requests filtering."
   - agent: "testing"
     message: "🆕 SOS EMERGENCY & SPIRITUAL ENGINE TESTING COMPLETE: All 18/18 comprehensive tests passed (100% success rate). New user created (+911111100005 -> SL-390270) via complete auth flow. ✅ SOS EMERGENCY SYSTEM (5/5 tests): Create SOS alert with Mumbai coordinates working (SOS ID: JQ2XW8aeNm65uA1fX4xo). Get My SOS, Get Nearby SOS (1 alert found), Respond to SOS ('coming'), and Resolve SOS ('resolved') all functional. 30-minute expiry and location tracking working. ✅ SPIRITUAL ENGINE PANCHANG (2/2 tests): Today's panchang (2026-03-12, Shukla Dashami) and specific date panchang (2026-03-15, Delhi coordinates) both working with complete astronomical data. ✅ SPIRITUAL ENGINE FESTIVALS (2/2 tests): Upcoming festivals list (5 festivals) and limited festivals (3 with limit parameter) working correctly. ✅ SPIRITUAL ENGINE HOROSCOPE (3/3 tests): All rashis list (12 rashis, Mesh->Aries), specific rashi horoscope (Mesh with prediction), and user horoscope (no profile message) all functional. ✅ ASTROLOGY PROFILE (3/3 tests): Set profile (DOB: 1990-05-15, calculated Mesh rashi), get profile, and personalized horoscope (has_profile: true) all working. Complete SOS Emergency System and Spiritual Engine implementations are production-ready with Firestore persistence."
+  - agent: "main"
+    message: "🟢 FRONTEND INTEGRATION FIX: 1) Fixed vendor screen crash with safe array access for categories. 2) Removed chat textbox from non-Chat tabs (Help/Blood/Medical/Financial) and added helpful prompt. 3) Added global floating button to root layout (visible on all screens when logged in). 4) Help request form now uses POST /api/help-requests API for persistence. 5) Added ErrorBoundary component for crash prevention. 6) FloatingUtilityButton connected to real SOS, Panchang, Festival, and Help Request APIs. READY FOR FRONTEND TESTING."

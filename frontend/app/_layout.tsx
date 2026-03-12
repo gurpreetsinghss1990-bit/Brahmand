@@ -4,9 +4,11 @@ import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuthStore } from '../src/store/authStore';
 import { COLORS } from '../src/constants/theme';
+import { FloatingUtilityButton } from '../src/components/FloatingUtilityButton';
+import { ErrorBoundary } from '../src/components/ErrorBoundary';
 
 export default function RootLayout() {
-  const { isLoading, loadStoredAuth } = useAuthStore();
+  const { isLoading, loadStoredAuth, token } = useAuthStore();
 
   useEffect(() => {
     loadStoredAuth();
@@ -21,7 +23,7 @@ export default function RootLayout() {
   }
 
   return (
-    <>
+    <ErrorBoundary>
       <StatusBar style="dark" />
       <Stack
         screenOptions={{
@@ -43,7 +45,9 @@ export default function RootLayout() {
         <Stack.Screen name="circle/create" options={{ presentation: 'modal' }} />
         <Stack.Screen name="circle/join" options={{ presentation: 'modal' }} />
       </Stack>
-    </>
+      {/* Global Floating Button - only show when logged in */}
+      {token && <FloatingUtilityButton />}
+    </ErrorBoundary>
   );
 }
 
