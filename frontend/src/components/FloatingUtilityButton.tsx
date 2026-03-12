@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -8,15 +8,47 @@ import {
   ScrollView,
   Dimensions,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  Animated,
+  Easing
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { COLORS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { useHelpRequestStore } from '../store/helpRequestStore';
-import { getWisdom, getPanchang } from '../services/api';
+import { 
+  getWisdom, 
+  createSOSAlert, 
+  getMySOSAlert, 
+  resolveSOSAlert,
+  getActiveSOSAlerts
+} from '../services/api';
+import * as Location from 'expo-location';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Panchang API
+const getPanchangData = async () => {
+  try {
+    const response = await fetch('https://brahmand-vendors.preview.emergentagent.com/api/spiritual/panchang');
+    return await response.json();
+  } catch (error) {
+    console.error('Panchang error:', error);
+    return null;
+  }
+};
+
+// Festivals API
+const getFestivalsData = async () => {
+  try {
+    const response = await fetch('https://brahmand-vendors.preview.emergentagent.com/api/spiritual/festivals?limit=1');
+    const data = await response.json();
+    return data?.[0] || null;
+  } catch (error) {
+    console.error('Festivals error:', error);
+    return null;
+  }
+};
 
 const getHelpIcon = (type: string): string => {
   switch (type) {
@@ -42,39 +74,155 @@ export const FloatingUtilityButton = () => {
   const router = useRouter();
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [sosLoading, setSOSLoading] = useState(false);
   const { activeRequest, fetchActiveRequest, resolveRequest, hasActiveRequest } = useHelpRequestStore();
   
-  // Wisdom and Panchang data
+  // SOS state
+  const [activeSOS, setActiveSOS] = useState<any>(null);
+  const [nearbySOSCount, setNearbySOSCount] = useState(0);
+  
+  // Spiritual data
   const [wisdom, setWisdom] = useState<any>(null);
   const [panchang, setPanchang] = useState<any>(null);
+  const [nextFestival, setNextFestival] = useState<any>(null);
+  
+  // Pulse animation for nearby SOS
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     fetchActiveRequest();
     loadUtilityData();
+    checkSOSStatus();
   }, []);
+
+  useEffect(() => {
+    if (nearbySOSCount > 0) {
+      // Start pulsing animation
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.2,
+            duration: 500,
+            easing: Easing.ease,
+            useNativeDriver: true
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 500,
+            easing: Easing.ease,
+            useNativeDriver: true
+          })
+        ])
+      ).start();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [nearbySOSCount]);
 
   const loadUtilityData = async () => {
     try {
-      const [wisdomRes, panchangRes] = await Promise.all([
-        getWisdom(),
-        getPanchang()
+      const [wisdomRes, panchangData, festivalData] = await Promise.all([
+        getWisdom().catch(() => null),
+        getPanchangData(),
+        getFestivalsData()
       ]);
-      setWisdom(wisdomRes.data);
-      setPanchang(panchangRes.data);
+      setWisdom(wisdomRes?.data);
+      setPanchang(panchangData);
+      setNextFestival(festivalData);
     } catch (error) {
       console.error('Error loading utility data:', error);
     }
   };
 
-  const handleSOS = () => {
+  const checkSOSStatus = async () => {
+    try {
+      // Check for user's active SOS
+      const mySOSRes = await getMySOSAlert();
+      setActiveSOS(mySOSRes.data);
+
+      // Check for nearby SOS alerts
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const location = await Location.getCurrentPositionAsync({});
+        const nearbyRes = await getActiveSOSAlerts({
+          lat: location.coords.latitude,
+          lng: location.coords.longitude,
+          radius: 10
+        });
+        // Don't count user's own SOS
+        const otherSOS = (nearbyRes.data || []).filter((s: any) => s.id !== mySOSRes.data?.id);
+        setNearbySOSCount(otherSOS.length);
+      }
+    } catch (error) {
+      console.error('Error checking SOS status:', error);
+    }
+  };
+
+  const handleCreateSOS = async () => {
     Alert.alert(
       'Emergency SOS',
-      'This will alert nearby community members. Are you sure?',
+      'This will alert nearby community members with your location. Are you sure you need emergency help?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Send SOS', style: 'destructive', onPress: () => {
-          Alert.alert('SOS Alert', 'SOS Alert sent to nearby community members!');
-        }}
+        { 
+          text: 'SEND SOS', 
+          style: 'destructive', 
+          onPress: async () => {
+            setSOSLoading(true);
+            try {
+              const { status } = await Location.requestForegroundPermissionsAsync();
+              if (status !== 'granted') {
+                Alert.alert('Location Required', 'Please enable location to send SOS alert');
+                return;
+              }
+              
+              const location = await Location.getCurrentPositionAsync({});
+              
+              const response = await createSOSAlert({
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude
+              });
+              
+              setActiveSOS(response.data);
+              Alert.alert('SOS Alert Sent', 'Your emergency alert has been sent to nearby community members. Stay safe!');
+            } catch (error: any) {
+              Alert.alert('Error', error.response?.data?.detail || 'Failed to send SOS alert');
+            } finally {
+              setSOSLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleResolveActiveSOS = async (status: 'resolved' | 'cancelled') => {
+    if (!activeSOS) return;
+    
+    const message = status === 'resolved' 
+      ? 'Has help arrived? This will close your SOS alert.'
+      : 'Cancel your SOS alert?';
+    
+    Alert.alert(
+      status === 'resolved' ? 'Help Received' : 'Cancel SOS',
+      message,
+      [
+        { text: 'No', style: 'cancel' },
+        { 
+          text: 'Yes', 
+          onPress: async () => {
+            setSOSLoading(true);
+            try {
+              await resolveSOSAlert(activeSOS.id, status);
+              setActiveSOS(null);
+              Alert.alert('Success', status === 'resolved' ? 'Glad you received help!' : 'SOS alert cancelled');
+            } catch (error: any) {
+              Alert.alert('Error', error.response?.data?.detail || 'Failed to resolve SOS');
+            } finally {
+              setSOSLoading(false);
+            }
+          }
+        }
       ]
     );
   };
@@ -82,7 +230,7 @@ export const FloatingUtilityButton = () => {
   const handleStopHelp = async () => {
     Alert.alert(
       'Resolve Help Request',
-      'Has your help request been fulfilled? This will close the request and notify the community.',
+      'Has your help request been fulfilled? This will close the request.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Confirm', onPress: async () => {
@@ -102,27 +250,45 @@ export const FloatingUtilityButton = () => {
   };
 
   const isActiveHelp = hasActiveRequest();
+  const hasNearbyEmergency = nearbySOSCount > 0;
 
   return (
     <>
-      {/* Floating Button - Glass Effect Style */}
-      <TouchableOpacity
-        style={styles.floatingButton}
-        onPress={() => setModalVisible(true)}
-        activeOpacity={0.9}
-      >
-        <View style={styles.glassBackground}>
-          {isActiveHelp && activeRequest ? (
-            <Ionicons 
-              name={getHelpIcon(activeRequest.type) as any} 
-              size={22} 
-              color={getHelpColor(activeRequest.type)} 
-            />
-          ) : (
-            <View style={styles.redDot} />
-          )}
-        </View>
-      </TouchableOpacity>
+      {/* Floating Button */}
+      <Animated.View style={[
+        styles.floatingButtonContainer,
+        { transform: [{ scale: hasNearbyEmergency ? pulseAnim : 1 }] }
+      ]}>
+        <TouchableOpacity
+          style={[
+            styles.floatingButton,
+            hasNearbyEmergency && styles.floatingButtonEmergency,
+            activeSOS && styles.floatingButtonActiveSOS
+          ]}
+          onPress={() => setModalVisible(true)}
+          activeOpacity={0.9}
+        >
+          <View style={[
+            styles.glassBackground,
+            hasNearbyEmergency && styles.glassBackgroundEmergency,
+            activeSOS && styles.glassBackgroundActiveSOS
+          ]}>
+            {activeSOS ? (
+              <Ionicons name="alert-circle" size={24} color="#FFFFFF" />
+            ) : isActiveHelp && activeRequest ? (
+              <Ionicons 
+                name={getHelpIcon(activeRequest.type) as any} 
+                size={22} 
+                color={getHelpColor(activeRequest.type)} 
+              />
+            ) : hasNearbyEmergency ? (
+              <Ionicons name="alert" size={22} color="#FFFFFF" />
+            ) : (
+              <View style={styles.redDot} />
+            )}
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
 
       {/* Bottom Panel Modal */}
       <Modal
@@ -142,6 +308,50 @@ export const FloatingUtilityButton = () => {
             <Text style={styles.modalTitle}>Sanatan Utilities</Text>
 
             <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Active SOS Section */}
+              {activeSOS && (
+                <View style={styles.activeSosCard}>
+                  <View style={styles.activeSosHeader}>
+                    <Ionicons name="alert-circle" size={24} color="#FFFFFF" />
+                    <Text style={styles.activeSosTitle}>YOUR SOS IS ACTIVE</Text>
+                  </View>
+                  <Text style={styles.activeSosLocation}>
+                    Location: {activeSOS.area}, {activeSOS.city}
+                  </Text>
+                  {activeSOS.responders?.length > 0 && (
+                    <Text style={styles.activeSosResponders}>
+                      {activeSOS.responders.length} people responding
+                    </Text>
+                  )}
+                  
+                  <View style={styles.sosButtonRow}>
+                    <TouchableOpacity 
+                      style={styles.sosResolveButton}
+                      onPress={() => handleResolveActiveSOS('resolved')}
+                      disabled={sosLoading}
+                    >
+                      {sosLoading ? (
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                      ) : (
+                        <>
+                          <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
+                          <Text style={styles.sosButtonText}>HELP RECEIVED</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                      style={styles.sosCancelButton}
+                      onPress={() => handleResolveActiveSOS('cancelled')}
+                      disabled={sosLoading}
+                    >
+                      <Ionicons name="close-circle" size={18} color={COLORS.error} />
+                      <Text style={[styles.sosButtonText, { color: COLORS.error }]}>CANCEL</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
               {/* Active Help Request Section */}
               {isActiveHelp && activeRequest && (
                 <View style={styles.activeHelpCard}>
@@ -153,7 +363,6 @@ export const FloatingUtilityButton = () => {
                   </View>
                   <Text style={styles.activeHelpType}>{activeRequest.type.toUpperCase()} - {activeRequest.title}</Text>
                   <Text style={styles.activeHelpUrgency}>Urgency: {activeRequest.urgency}</Text>
-                  <Text style={styles.activeHelpLocation}>Location: {activeRequest.location || 'Not specified'}</Text>
                   
                   <TouchableOpacity 
                     style={styles.stopHelpButton}
@@ -165,7 +374,7 @@ export const FloatingUtilityButton = () => {
                     ) : (
                       <>
                         <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
-                        <Text style={styles.stopHelpText}>STOP HELP - Mark as Fulfilled</Text>
+                        <Text style={styles.stopHelpText}>MARK AS FULFILLED</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -193,7 +402,7 @@ export const FloatingUtilityButton = () => {
                 </Text>
               </View>
 
-              {/* Two Card Row */}
+              {/* Panchang and Festival Row */}
               <View style={styles.twoCardRow}>
                 <TouchableOpacity 
                   style={styles.mediumCard}
@@ -210,44 +419,74 @@ export const FloatingUtilityButton = () => {
                   <Text style={styles.mediumDetail}>{panchang?.nakshatra || ''}</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.mediumCard}>
-                  <View style={[styles.mediumIconBg, { backgroundColor: '#E3F2FD' }]}>
-                    <Ionicons name="star" size={20} color={COLORS.info} />
+                <View style={styles.mediumCard}>
+                  <View style={[styles.mediumIconBg, { backgroundColor: '#E8F5E9' }]}>
+                    <Ionicons name="sparkles" size={20} color={COLORS.success} />
                   </View>
-                  <Text style={styles.mediumTitle}>Daily Horoscope</Text>
-                  <Text style={styles.mediumSubtext}>{panchang?.yoga || 'Shubh'}</Text>
-                  <Text style={styles.mediumDetail} numberOfLines={2}>
-                    {panchang?.karana || 'Today is favorable'}
+                  <Text style={styles.mediumTitle}>Next Festival</Text>
+                  <Text style={styles.mediumSubtext}>{nextFestival?.name || 'Loading...'}</Text>
+                  <Text style={styles.mediumDetail}>
+                    {nextFestival?.days_until !== undefined 
+                      ? `in ${nextFestival.days_until} days` 
+                      : ''
+                    }
                   </Text>
-                </TouchableOpacity>
+                </View>
               </View>
+
+              {/* Horoscope Card */}
+              <TouchableOpacity 
+                style={styles.horoscopeCard}
+                onPress={() => {
+                  setModalVisible(false);
+                  router.push('/profile');
+                }}
+              >
+                <View style={[styles.mediumIconBg, { backgroundColor: '#E3F2FD' }]}>
+                  <Ionicons name="star" size={20} color={COLORS.info} />
+                </View>
+                <View style={styles.horoscopeContent}>
+                  <Text style={styles.mediumTitle}>Daily Horoscope</Text>
+                  <Text style={styles.mediumSubtext}>Set your birth details in Profile</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+              </TouchableOpacity>
 
               {/* SOS Card */}
-              <View style={styles.sosCard}>
-                <View style={styles.sosHeader}>
-                  <View style={styles.sosIconBg}>
-                    <Ionicons name="alert-circle" size={28} color={COLORS.error} />
+              {!activeSOS && (
+                <View style={styles.sosCard}>
+                  <View style={styles.sosHeader}>
+                    <View style={styles.sosIconBg}>
+                      <Ionicons name="alert-circle" size={28} color={COLORS.error} />
+                    </View>
+                    <Text style={styles.sosTitle}>Emergency SOS</Text>
                   </View>
-                  <Text style={styles.sosTitle}>Emergency SOS</Text>
+                  
+                  <Text style={styles.sosDescription}>
+                    Use this if you need urgent help. This will instantly alert nearby community members with your location.
+                  </Text>
+
+                  <TouchableOpacity 
+                    style={styles.sosButton}
+                    onPress={handleCreateSOS}
+                    activeOpacity={0.8}
+                    disabled={sosLoading}
+                  >
+                    {sosLoading ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <>
+                        <Ionicons name="alert" size={20} color="#FFFFFF" />
+                        <Text style={styles.sosButtonMainText}>SEND SOS</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <Text style={styles.sosNote}>
+                    Your location will be shared to help people reach you faster.
+                  </Text>
                 </View>
-                
-                <Text style={styles.sosDescription}>
-                  Use this if you need urgent help. This powerful feature instantly alerts nearby community members who can assist you.
-                </Text>
-
-                <TouchableOpacity 
-                  style={styles.sosButton}
-                  onPress={handleSOS}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="alert" size={20} color="#FFFFFF" />
-                  <Text style={styles.sosButtonText}>SEND SOS</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.sosNote}>
-                  Your location will be shared to help people reach you faster.
-                </Text>
-              </View>
+              )}
             </ScrollView>
           </View>
         </TouchableOpacity>
@@ -257,10 +496,12 @@ export const FloatingUtilityButton = () => {
 };
 
 const styles = StyleSheet.create({
-  floatingButton: {
+  floatingButtonContainer: {
     position: 'absolute',
     bottom: 90,
     right: 16,
+  },
+  floatingButton: {
     width: 52,
     height: 52,
     borderRadius: 26,
@@ -271,6 +512,14 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 6,
   },
+  floatingButtonEmergency: {
+    shadowColor: '#E53935',
+    shadowOpacity: 0.4,
+  },
+  floatingButtonActiveSOS: {
+    shadowColor: '#E53935',
+    shadowOpacity: 0.6,
+  },
   glassBackground: {
     width: '100%',
     height: '100%',
@@ -280,6 +529,12 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  glassBackgroundEmergency: {
+    backgroundColor: '#E53935',
+  },
+  glassBackgroundActiveSOS: {
+    backgroundColor: '#E53935',
   },
   redDot: {
     width: 14,
@@ -298,7 +553,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     padding: SPACING.md,
     paddingBottom: SPACING.xl,
-    maxHeight: SCREEN_HEIGHT * 0.6,
+    maxHeight: SCREEN_HEIGHT * 0.7,
   },
   modalHandle: {
     width: 40,
@@ -314,6 +569,62 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     textAlign: 'center',
     marginBottom: SPACING.md,
+  },
+  // Active SOS Card
+  activeSosCard: {
+    backgroundColor: '#E53935',
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  activeSosHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  activeSosTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+    marginLeft: SPACING.sm,
+  },
+  activeSosLocation: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  activeSosResponders: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 13,
+    marginBottom: SPACING.md,
+  },
+  sosButtonRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+  },
+  sosResolveButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#43A047',
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  sosCancelButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  sosButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 4,
   },
   // Active Help Request
   activeHelpCard: {
@@ -351,11 +662,6 @@ const styles = StyleSheet.create({
   activeHelpUrgency: {
     fontSize: 13,
     color: COLORS.textSecondary,
-    marginBottom: 2,
-  },
-  activeHelpLocation: {
-    fontSize: 12,
-    color: COLORS.textLight,
     marginBottom: SPACING.md,
   },
   stopHelpButton: {
@@ -451,6 +757,19 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
     marginTop: 2,
   },
+  // Horoscope Card
+  horoscopeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  horoscopeContent: {
+    flex: 1,
+    marginLeft: SPACING.sm,
+  },
   // SOS Card
   sosCard: {
     backgroundColor: '#FFF5F5',
@@ -493,7 +812,7 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.md,
     marginBottom: SPACING.sm,
   },
-  sosButtonText: {
+  sosButtonMainText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
