@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { 
   View, 
   Text, 
@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
 import { COLORS, SPACING } from '../../src/constants/theme';
 
 const TABS = ['Nearby', 'Pooja', 'Grocery', 'Restaurant', 'Festival'];

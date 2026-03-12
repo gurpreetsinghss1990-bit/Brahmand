@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
 import { getCommunities, getCommunityMessages } from '../../src/services/api';
 import { useAuthStore } from '../../src/store/authStore';
 import { COLORS, SPACING } from '../../src/constants/theme';
@@ -47,11 +46,9 @@ export default function CommunityScreen() {
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchCommunities();
-    }, [fetchCommunities])
-  );
+  useEffect(() => {
+    fetchCommunities();
+  }, [fetchCommunities]);
 
   const getCommunityIcon = (type: string) => {
     switch (type) {
