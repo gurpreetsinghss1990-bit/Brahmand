@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -6,10 +6,15 @@ import {
   TouchableOpacity, 
   Modal,
   ScrollView,
-  Dimensions
+  Dimensions,
+  Alert,
+  Platform
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../constants/theme';
+import { useHelpRequestStore } from '../store/helpRequestStore';
+import type { HelpRequest } from '../store/helpRequestStore';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -18,53 +23,96 @@ const MOCK_GITA_SLOK = {
   chapter: 2,
   verse: 47,
   sanskrit: "कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।\nमा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि॥",
-  translation: "You have a right to perform your prescribed duties, but you are not entitled to the fruits of your actions. Never consider yourself the cause of the results, and never be attached to inaction."
+  translation: "You have a right to perform your prescribed duties, but you are not entitled to the fruits of your actions."
 };
 
 const MOCK_PANCHANG = {
   tithi: "Shukla Dashami",
   nakshatra: "Uttara Phalguni",
-  yoga: "Shobhana",
-  karana: "Balava",
-  sunrise: "6:32 AM",
-  sunset: "6:18 PM"
 };
 
 const MOCK_HOROSCOPE = {
   sign: "Aries",
-  prediction: "Today is favorable for new beginnings. Focus on your goals and take decisive action."
+  prediction: "Today is favorable for new beginnings."
+};
+
+const getHelpIcon = (type: string): string => {
+  switch (type) {
+    case 'blood': return 'water';
+    case 'medical': return 'medkit';
+    case 'financial': return 'cash';
+    default: return 'hand-left';
+  }
+};
+
+const getHelpColor = (type: string): string => {
+  switch (type) {
+    case 'blood': return '#E53935';
+    case 'medical': return '#1976D2';
+    case 'financial': return '#43A047';
+    default: return COLORS.primary;
+  }
 };
 
 export const FloatingUtilityButton = () => {
   const [modalVisible, setModalVisible] = useState(false);
-  const [sosActive, setSosActive] = useState(false); // Would come from real-time SOS detection
+  const { activeRequest, resolveRequest, loadFromStorage } = useHelpRequestStore();
+
+  useEffect(() => {
+    loadFromStorage();
+  }, []);
 
   const handleSOS = () => {
-    // SOS functionality would be implemented here
-    alert('SOS Alert sent to nearby community members!');
+    Alert.alert(
+      'Emergency SOS',
+      'This will alert nearby community members. Are you sure?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Send SOS', style: 'destructive', onPress: () => {
+          alert('SOS Alert sent to nearby community members!');
+        }}
+      ]
+    );
   };
+
+  const handleStopHelp = () => {
+    Alert.alert(
+      'Resolve Help Request',
+      'Has your help request been fulfilled? This will close the request and notify the community.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Confirm', onPress: () => {
+          resolveRequest();
+          setModalVisible(false);
+        }}
+      ]
+    );
+  };
+
+  const hasActiveHelp = activeRequest?.status === 'active';
 
   return (
     <>
-      {/* Floating Button - Apple Assistive Touch Style */}
+      {/* Floating Button - Glass Effect Style */}
       <TouchableOpacity
-        style={[
-          styles.floatingButton,
-          sosActive && styles.floatingButtonSOS
-        ]}
+        style={styles.floatingButton}
         onPress={() => setModalVisible(true)}
         activeOpacity={0.9}
       >
-        <View style={[styles.buttonInner, sosActive && styles.buttonInnerSOS]}>
-          {sosActive ? (
-            <Ionicons name="alert" size={20} color="#FFFFFF" />
+        <View style={styles.glassBackground}>
+          {hasActiveHelp ? (
+            <Ionicons 
+              name={getHelpIcon(activeRequest.type) as any} 
+              size={22} 
+              color={getHelpColor(activeRequest.type)} 
+            />
           ) : (
-            <View style={styles.normalIndicator} />
+            <View style={styles.redDot} />
           )}
         </View>
       </TouchableOpacity>
 
-      {/* Bottom Panel Modal - Max 50% height */}
+      {/* Bottom Panel Modal */}
       <Modal
         visible={modalVisible}
         transparent
@@ -77,14 +125,34 @@ export const FloatingUtilityButton = () => {
           onPress={() => setModalVisible(false)}
         >
           <View style={styles.modalContent}>
-            {/* Handle */}
             <View style={styles.modalHandle} />
             
-            {/* Title */}
             <Text style={styles.modalTitle}>Sanatan Utilities</Text>
 
             <ScrollView showsVerticalScrollIndicator={false}>
-              {/* 1. Large Card - Bhagavad Gita Slok */}
+              {/* Active Help Request Section */}
+              {hasActiveHelp && (
+                <View style={styles.activeHelpCard}>
+                  <View style={styles.activeHelpHeader}>
+                    <View style={[styles.helpTypeBadge, { backgroundColor: `${getHelpColor(activeRequest.type)}20` }]}>
+                      <Ionicons name={getHelpIcon(activeRequest.type) as any} size={18} color={getHelpColor(activeRequest.type)} />
+                    </View>
+                    <Text style={styles.activeHelpTitle}>Your Active Help Request</Text>
+                  </View>
+                  <Text style={styles.activeHelpType}>{activeRequest.type.toUpperCase()} - {activeRequest.title}</Text>
+                  <Text style={styles.activeHelpUrgency}>Urgency: {activeRequest.urgency}</Text>
+                  
+                  <TouchableOpacity 
+                    style={styles.stopHelpButton}
+                    onPress={handleStopHelp}
+                  >
+                    <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
+                    <Text style={styles.stopHelpText}>STOP HELP - Mark as Fulfilled</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Gita Slok Card */}
               <View style={styles.gitaCard}>
                 <View style={styles.gitaHeader}>
                   <View style={styles.gitaIconBg}>
@@ -99,9 +167,8 @@ export const FloatingUtilityButton = () => {
                 <Text style={styles.gitaTranslation}>{MOCK_GITA_SLOK.translation}</Text>
               </View>
 
-              {/* 2. Two Medium Cards - Panchang & Horoscope */}
+              {/* Two Card Row */}
               <View style={styles.twoCardRow}>
-                {/* Panchang Card */}
                 <TouchableOpacity style={styles.mediumCard}>
                   <View style={[styles.mediumIconBg, { backgroundColor: '#FFE5CC' }]}>
                     <Ionicons name="calendar" size={20} color={COLORS.primary} />
@@ -111,7 +178,6 @@ export const FloatingUtilityButton = () => {
                   <Text style={styles.mediumDetail}>{MOCK_PANCHANG.nakshatra}</Text>
                 </TouchableOpacity>
 
-                {/* Horoscope Card */}
                 <TouchableOpacity style={styles.mediumCard}>
                   <View style={[styles.mediumIconBg, { backgroundColor: '#E3F2FD' }]}>
                     <Ionicons name="star" size={20} color={COLORS.info} />
@@ -122,7 +188,7 @@ export const FloatingUtilityButton = () => {
                 </TouchableOpacity>
               </View>
 
-              {/* 3. Large SOS Card */}
+              {/* SOS Card */}
               <View style={styles.sosCard}>
                 <View style={styles.sosHeader}>
                   <View style={styles.sosIconBg}>
@@ -157,7 +223,6 @@ export const FloatingUtilityButton = () => {
 };
 
 const styles = StyleSheet.create({
-  // Floating Button - Apple Assistive Touch Style
   floatingButton: {
     position: 'absolute',
     bottom: 90,
@@ -165,42 +230,29 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: 'rgba(240, 240, 240, 0.95)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 6,
   },
-  floatingButtonSOS: {
-    backgroundColor: COLORS.error,
-  },
-  buttonInner: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#FFFFFF',
+  glassBackground: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(200, 200, 200, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
-  buttonInnerSOS: {
-    backgroundColor: COLORS.error,
-  },
-  normalIndicator: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+  redDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     backgroundColor: '#E53935',
   },
-
-  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
@@ -212,7 +264,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     padding: SPACING.md,
     paddingBottom: SPACING.xl,
-    maxHeight: SCREEN_HEIGHT * 0.5, // Max 50% of screen
+    maxHeight: SCREEN_HEIGHT * 0.5,
   },
   modalHandle: {
     width: 40,
@@ -229,8 +281,59 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: SPACING.md,
   },
-
-  // Gita Card (Large)
+  // Active Help Request
+  activeHelpCard: {
+    backgroundColor: '#FFF8E1',
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: '#FFE082',
+  },
+  activeHelpHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  helpTypeBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.sm,
+  },
+  activeHelpTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  activeHelpType: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  activeHelpUrgency: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.md,
+  },
+  stopHelpButton: {
+    backgroundColor: COLORS.success,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  stopHelpText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginLeft: SPACING.sm,
+  },
+  // Gita Card
   gitaCard: {
     backgroundColor: '#F1F8E9',
     borderRadius: BORDER_RADIUS.lg,
@@ -261,19 +364,18 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
   },
   gitaSanskrit: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#2E7D32',
     fontStyle: 'italic',
-    lineHeight: 22,
-    marginBottom: SPACING.sm,
+    lineHeight: 20,
+    marginBottom: SPACING.xs,
     textAlign: 'center',
   },
   gitaTranslation: {
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.textSecondary,
-    lineHeight: 19,
+    lineHeight: 18,
   },
-
   // Two Card Row
   twoCardRow: {
     flexDirection: 'row',
@@ -310,8 +412,7 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
     marginTop: 2,
   },
-
-  // SOS Card (Large)
+  // SOS Card
   sosCard: {
     backgroundColor: '#FFF5F5',
     borderRadius: BORDER_RADIUS.lg,

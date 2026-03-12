@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -7,6 +7,8 @@ import {
   TouchableOpacity, 
   RefreshControl,
   FlatList,
+  TextInput,
+  Linking,
   Alert
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -14,118 +16,134 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 import { VendorRegistrationModal } from '../../src/components/VendorRegistrationModal';
 import { useAuthStore } from '../../src/store/authStore';
+import { useVendorStore, Vendor, VENDOR_CATEGORIES } from '../../src/store/vendorStore';
 
 const TABS = ['Nearby', 'Pooja', 'Grocery', 'Restaurant', 'Festival'];
 
-interface Vendor {
-  id: string;
-  business_name: string;
-  owner_name: string;
-  category: string;
-  address?: string;
-  contact_number: string;
-  delivery_available: boolean;
-  distance?: number;
-  rating?: number;
-}
-
-// Mock vendors - in real app this would come from API
-const INITIAL_VENDORS: Vendor[] = [
-  { id: '1', business_name: 'Sharma Pooja Samagri', owner_name: 'Ramesh Sharma', category: 'Pooja', address: 'Borivali West', contact_number: '9876543210', delivery_available: true, distance: 0.5, rating: 4.5 },
-  { id: '2', business_name: 'Krishna Grocery Store', owner_name: 'Krishna Patel', category: 'Grocery', address: 'Kandivali East', contact_number: '9876543211', delivery_available: true, distance: 1.2, rating: 4.2 },
-  { id: '3', business_name: 'Annapurna Restaurant', owner_name: 'Suresh Gupta', category: 'Restaurant', address: 'Malad West', contact_number: '9876543212', delivery_available: false, distance: 2.0, rating: 4.8 },
-];
+const TRUST_LABELS = {
+  trusted: { label: 'Trusted Vendor', color: COLORS.success, icon: 'shield-checkmark' },
+  frequent: { label: 'Frequently Used', color: COLORS.info, icon: 'trending-up' },
+  verified_local: { label: 'Verified Local', color: COLORS.primary, icon: 'location' },
+};
 
 export default function VendorScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
+  const { vendors, myVendor, addVendor, setMyVendor, getFilteredVendors, loadFromStorage } = useVendorStore();
+  
   const [activeTab, setActiveTab] = useState('Nearby');
-  const [vendors, setVendors] = useState<Vendor[]>(INITIAL_VENDORS);
   const [refreshing, setRefreshing] = useState(false);
   const [showRegistrationModal, setShowRegistrationModal] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [filteredCategories, setFilteredCategories] = useState<string[]>([]);
 
-  const getFilteredVendors = () => {
-    if (activeTab === 'Nearby') {
-      return [...vendors].sort((a, b) => (a.distance || 0) - (b.distance || 0));
+  useEffect(() => {
+    loadFromStorage();
+  }, []);
+
+  useEffect(() => {
+    if (searchTerm) {
+      const filtered = VENDOR_CATEGORIES.filter(cat => 
+        cat.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+      setFilteredCategories(filtered);
+    } else {
+      setFilteredCategories([]);
     }
-    return vendors.filter(v => v.category === activeTab);
-  };
+  }, [searchTerm]);
+
+  const displayVendors = getFilteredVendors(
+    activeTab === 'Nearby' ? undefined : activeTab,
+    searchTerm,
+    user?.id
+  );
 
   const handleRegisterVendor = async (data: any) => {
-    // Create new vendor with random ID
     const newVendor: Vendor = {
       id: Date.now().toString(),
-      business_name: data.business_name,
-      owner_name: data.owner_name,
-      category: data.category,
+      businessName: data.businessName,
+      ownerName: data.ownerName,
+      phoneNumber: data.phoneNumber,
+      yearsInBusiness: data.yearsInBusiness,
+      categories: data.categories,
       address: data.address,
-      contact_number: data.contact_number,
-      delivery_available: data.delivery_available,
-      distance: 0.1, // Assume very close since it's user's own vendor
-      rating: 5.0, // New vendors start with 5 star
+      locationLink: data.locationLink,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      distance: 0,
+      trustLabel: 'verified_local',
+      galleryPhotos: data.photos || [],
+      ownerId: user?.id || '',
+      createdAt: new Date().toISOString(),
     };
 
-    // Add to vendors list immediately
-    setVendors(prev => [newVendor, ...prev]);
-    Alert.alert('Success', 'Vendor registered successfully!');
+    addVendor(newVendor);
+    setMyVendor(newVendor);
+    Alert.alert('Success', 'Your business has been registered!');
   };
 
-  const getVendorIcon = (category: string) => {
-    switch (category) {
-      case 'Pooja': return 'flower';
-      case 'Grocery': return 'basket';
-      case 'Restaurant': return 'restaurant';
-      case 'Festival': return 'sparkles';
-      default: return 'storefront';
-    }
+  const handleCall = (phone: string) => {
+    Linking.openURL(`tel:${phone}`);
   };
 
-  const getVendorColor = (category: string) => {
-    switch (category) {
-      case 'Pooja': return '#9C27B0';
-      case 'Grocery': return COLORS.success;
-      case 'Restaurant': return COLORS.warning;
-      case 'Festival': return '#E91E63';
-      default: return COLORS.primary;
-    }
+  const getVendorIcon = (categories: string[]) => {
+    const category = categories[0];
+    if (category?.includes('Pooja') || category?.includes('Pandit')) return 'flower';
+    if (category?.includes('Grocery') || category?.includes('Sweets')) return 'basket';
+    if (category?.includes('Restaurant') || category?.includes('Catering')) return 'restaurant';
+    if (category?.includes('Gym') || category?.includes('Yoga')) return 'fitness';
+    if (category?.includes('Salon')) return 'cut';
+    return 'storefront';
   };
 
-  const renderVendor = ({ item }: { item: Vendor }) => (
-    <TouchableOpacity style={styles.vendorCard}>
-      <View style={[styles.vendorIcon, { backgroundColor: `${getVendorColor(item.category)}15` }]}>
-        <Ionicons 
-          name={getVendorIcon(item.category)} 
-          size={24} 
-          color={getVendorColor(item.category)} 
-        />
-      </View>
-      <View style={styles.vendorInfo}>
-        <Text style={styles.vendorName}>{item.business_name}</Text>
-        <Text style={styles.vendorOwner}>{item.owner_name}</Text>
-        <View style={styles.vendorMeta}>
-          <View style={styles.metaItem}>
-            <Ionicons name="location" size={12} color={COLORS.textLight} />
-            <Text style={styles.metaText}>{item.distance?.toFixed(1)} km</Text>
-          </View>
-          {item.rating && (
-            <View style={styles.metaItem}>
-              <Ionicons name="star" size={12} color={COLORS.warning} />
-              <Text style={styles.metaText}>{item.rating}</Text>
+  const renderVendor = ({ item }: { item: Vendor }) => {
+    const trustInfo = TRUST_LABELS[item.trustLabel];
+    
+    return (
+      <TouchableOpacity 
+        style={styles.vendorCard}
+        onPress={() => router.push(`/vendor/${item.id}`)}
+      >
+        {/* Business Image Placeholder */}
+        <View style={styles.vendorImageContainer}>
+          {item.coverPhoto ? (
+            <View style={styles.vendorImage}>
+              <Ionicons name="image" size={24} color={COLORS.textLight} />
             </View>
-          )}
-          {item.delivery_available && (
-            <View style={[styles.deliveryBadge]}>
-              <Ionicons name="bicycle" size={10} color={COLORS.success} />
-              <Text style={styles.deliveryText}>Delivery</Text>
+          ) : (
+            <View style={styles.vendorImagePlaceholder}>
+              <Ionicons name={getVendorIcon(item.categories) as any} size={28} color={COLORS.primary} />
             </View>
           )}
         </View>
-      </View>
-      <TouchableOpacity style={styles.callButton}>
-        <Ionicons name="call" size={18} color={COLORS.primary} />
+
+        <View style={styles.vendorInfo}>
+          <Text style={styles.vendorName}>{item.businessName}</Text>
+          
+          {/* Trust Label */}
+          <View style={[styles.trustBadge, { backgroundColor: `${trustInfo.color}15` }]}>
+            <Ionicons name={trustInfo.icon as any} size={12} color={trustInfo.color} />
+            <Text style={[styles.trustText, { color: trustInfo.color }]}>{trustInfo.label}</Text>
+          </View>
+          
+          {/* Distance */}
+          <View style={styles.distanceRow}>
+            <Ionicons name="location" size={12} color={COLORS.textLight} />
+            <Text style={styles.distanceText}>{item.distance?.toFixed(1)} km away</Text>
+          </View>
+        </View>
+
+        {/* Call Button */}
+        <TouchableOpacity 
+          style={styles.callButton}
+          onPress={() => handleCall(item.phoneNumber)}
+        >
+          <Ionicons name="call" size={20} color={COLORS.primary} />
+        </TouchableOpacity>
       </TouchableOpacity>
-    </TouchableOpacity>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -144,25 +162,81 @@ export default function VendorScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerIcon}>
-            <Ionicons name="search" size={22} color={COLORS.text} />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity 
+          style={styles.headerIcon}
+          onPress={() => setShowSearch(!showSearch)}
+        >
+          <Ionicons name="search" size={22} color={COLORS.text} />
+        </TouchableOpacity>
       </View>
 
+      {/* Search Bar */}
+      {showSearch && (
+        <View style={styles.searchContainer}>
+          <View style={styles.searchInputContainer}>
+            <Ionicons name="search" size={18} color={COLORS.textLight} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by category (Yoga, Gym, Restaurant...)"
+              placeholderTextColor={COLORS.textLight}
+              value={searchTerm}
+              onChangeText={setSearchTerm}
+            />
+            {searchTerm && (
+              <TouchableOpacity onPress={() => setSearchTerm('')}>
+                <Ionicons name="close-circle" size={18} color={COLORS.textLight} />
+              </TouchableOpacity>
+            )}
+          </View>
+          
+          {/* Category Suggestions */}
+          {filteredCategories.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsScroll}>
+              {filteredCategories.slice(0, 5).map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={styles.suggestionChip}
+                  onPress={() => setSearchTerm(cat)}
+                >
+                  <Text style={styles.suggestionText}>{cat}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+      )}
+
+      {/* My Business Section (if vendor owner) */}
+      {myVendor && (
+        <TouchableOpacity 
+          style={styles.myBusinessCard}
+          onPress={() => router.push('/vendor/dashboard')}
+        >
+          <View style={styles.myBusinessIcon}>
+            <Ionicons name="storefront" size={24} color={COLORS.primary} />
+          </View>
+          <View style={styles.myBusinessInfo}>
+            <Text style={styles.myBusinessLabel}>Manage My Business</Text>
+            <Text style={styles.myBusinessName}>{myVendor.businessName}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+        </TouchableOpacity>
+      )}
+
       {/* Register Vendor Button */}
-      <TouchableOpacity 
-        style={styles.registerButton}
-        onPress={() => setShowRegistrationModal(true)}
-      >
-        <Ionicons name="add-circle" size={20} color={COLORS.primary} />
-        <Text style={styles.registerText}>Register Vendor</Text>
-      </TouchableOpacity>
+      {!myVendor && (
+        <TouchableOpacity 
+          style={styles.registerButton}
+          onPress={() => setShowRegistrationModal(true)}
+        >
+          <Ionicons name="add-circle" size={20} color={COLORS.primary} />
+          <Text style={styles.registerText}>Register Your Business</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Vendor List */}
       <FlatList
-        data={getFilteredVendors()}
+        data={displayVendors}
         renderItem={renderVendor}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
@@ -179,7 +253,7 @@ export default function VendorScreen() {
           <View style={styles.emptyState}>
             <Ionicons name="storefront-outline" size={48} color={COLORS.textLight} />
             <Text style={styles.emptyText}>No vendors found</Text>
-            <Text style={styles.emptySubtext}>Be the first to register in this category!</Text>
+            <Text style={styles.emptySubtext}>Be the first to register in this area!</Text>
           </View>
         }
       />
@@ -228,13 +302,77 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     fontWeight: '600',
   },
-  headerActions: {
-    flexDirection: 'row',
-    paddingRight: SPACING.md,
-  },
   headerIcon: {
-    padding: SPACING.xs,
+    padding: SPACING.sm,
+    marginRight: SPACING.sm,
+  },
+  searchContainer: {
+    backgroundColor: COLORS.surface,
+    padding: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+  },
+  searchInput: {
+    flex: 1,
     marginLeft: SPACING.sm,
+    fontSize: 15,
+    color: COLORS.text,
+  },
+  suggestionsScroll: {
+    marginTop: SPACING.sm,
+  },
+  suggestionChip: {
+    backgroundColor: `${COLORS.primary}15`,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+    borderRadius: 16,
+    marginRight: SPACING.sm,
+  },
+  suggestionText: {
+    fontSize: 13,
+    color: COLORS.primary,
+    fontWeight: '500',
+  },
+  myBusinessCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.primary}10`,
+    margin: SPACING.md,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  myBusinessIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: COLORS.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.md,
+  },
+  myBusinessInfo: {
+    flex: 1,
+  },
+  myBusinessLabel: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  myBusinessName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginTop: 2,
   },
   registerButton: {
     flexDirection: 'row',
@@ -263,64 +401,64 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.surface,
     padding: SPACING.md,
-    borderRadius: 16,
+    borderRadius: BORDER_RADIUS.lg,
     marginBottom: 12,
   },
-  vendorIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
+  vendorImageContainer: {
+    marginRight: SPACING.md,
+  },
+  vendorImage: {
+    width: 64,
+    height: 64,
+    borderRadius: 12,
+    backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: SPACING.md,
+  },
+  vendorImagePlaceholder: {
+    width: 64,
+    height: 64,
+    borderRadius: 12,
+    backgroundColor: `${COLORS.primary}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   vendorInfo: {
     flex: 1,
   },
   vendorName: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
     color: COLORS.text,
+    marginBottom: 4,
   },
-  vendorOwner: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginTop: 1,
-  },
-  vendorMeta: {
+  trustBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
-    flexWrap: 'wrap',
-    gap: 8,
+    alignSelf: 'flex-start',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 3,
+    borderRadius: 12,
+    marginBottom: 4,
   },
-  metaItem: {
+  trustText: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  distanceRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  metaText: {
+  distanceText: {
     fontSize: 12,
     color: COLORS.textLight,
-    marginLeft: 3,
-  },
-  deliveryBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: `${COLORS.success}15`,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  deliveryText: {
-    fontSize: 10,
-    color: COLORS.success,
-    fontWeight: '500',
-    marginLeft: 3,
+    marginLeft: 4,
   },
   callButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: `${COLORS.primary}15`,
     justifyContent: 'center',
     alignItems: 'center',

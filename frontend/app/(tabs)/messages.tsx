@@ -17,7 +17,6 @@ import { Avatar } from '../../src/components/Avatar';
 import { useAuthStore } from '../../src/store/authStore';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 
-// Extended conversation type with status
 interface ConversationWithStatus extends Conversation {
   last_message_status?: 'delivered' | 'read';
   last_message_sender_id?: string;
@@ -45,7 +44,6 @@ export default function MessagesScreen() {
 
   useEffect(() => {
     fetchConversations();
-    // Poll for updates every 5 seconds
     const interval = setInterval(fetchConversations, 5000);
     return () => clearInterval(interval);
   }, [fetchConversations]);
@@ -72,7 +70,6 @@ export default function MessagesScreen() {
     }
   };
 
-  // Message status indicator component
   const MessageStatus = ({ status, isSentByMe }: { status?: string; isSentByMe: boolean }) => {
     if (!isSentByMe) return null;
     
@@ -88,19 +85,13 @@ export default function MessagesScreen() {
       case 'message':
         router.push('/dm/new');
         break;
-      case 'group':
-        // TODO: Implement group creation
-        alert('Group creation coming soon!');
-        break;
       case 'circle':
-        // TODO: Navigate to circle creation
         alert('Circle creation coming soon!');
         break;
     }
   };
 
   const renderConversation = ({ item }: { item: ConversationWithStatus }) => {
-    // Check if the last message was sent by current user
     const isSentByMe = item.last_message_sender_id === user?.id;
     
     return (
@@ -183,7 +174,7 @@ export default function MessagesScreen() {
         />
       )}
 
-      {/* Create Menu Modal */}
+      {/* Create Menu Modal - Only New Message and New Circle */}
       <Modal
         visible={showCreateMenu}
         transparent
@@ -211,27 +202,14 @@ export default function MessagesScreen() {
 
             <TouchableOpacity 
               style={styles.menuItem}
-              onPress={() => handleCreateOption('group')}
-            >
-              <View style={[styles.menuIconBg, { backgroundColor: `${COLORS.success}15` }]}>
-                <Ionicons name="people" size={20} color={COLORS.success} />
-              </View>
-              <View style={styles.menuItemInfo}>
-                <Text style={styles.menuItemTitle}>Create Group</Text>
-                <Text style={styles.menuItemSubtitle}>Chat with multiple people</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.menuItem}
               onPress={() => handleCreateOption('circle')}
             >
               <View style={[styles.menuIconBg, { backgroundColor: `${COLORS.info}15` }]}>
                 <Ionicons name="ellipse-outline" size={20} color={COLORS.info} />
               </View>
               <View style={styles.menuItemInfo}>
-                <Text style={styles.menuItemTitle}>Create Circle</Text>
-                <Text style={styles.menuItemSubtitle}>Create a trusted circle</Text>
+                <Text style={styles.menuItemTitle}>New Circle</Text>
+                <Text style={styles.menuItemSubtitle}>Create a trusted private group</Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -361,7 +339,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: SPACING.xs,
   },
-  // Menu Modal
   menuOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

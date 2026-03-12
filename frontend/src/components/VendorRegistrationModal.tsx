@@ -10,19 +10,18 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Switch,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import { COLORS, SPACING, BORDER_RADIUS } from '../constants/theme';
+import { VENDOR_CATEGORIES } from '../store/vendorStore';
 
 interface VendorRegistrationModalProps {
   visible: boolean;
   onClose: () => void;
   onSubmit: (data: any) => Promise<void>;
 }
-
-const CATEGORIES = ['Pooja', 'Grocery', 'Restaurant', 'Festival', 'Other'];
 
 export const VendorRegistrationModal: React.FC<VendorRegistrationModalProps> = ({
   visible,
@@ -32,73 +31,100 @@ export const VendorRegistrationModal: React.FC<VendorRegistrationModalProps> = (
   const [loading, setLoading] = useState(false);
   const [businessName, setBusinessName] = useState('');
   const [ownerName, setOwnerName] = useState('');
-  const [category, setCategory] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [yearsInBusiness, setYearsInBusiness] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [address, setAddress] = useState('');
-  const [contactNumber, setContactNumber] = useState('');
-  const [deliveryAvailable, setDeliveryAvailable] = useState(false);
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [locationLink, setLocationLink] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [categorySearch, setCategorySearch] = useState('');
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+
+  const filteredCategories = VENDOR_CATEGORIES.filter(
+    cat => cat.toLowerCase().includes(categorySearch.toLowerCase()) &&
+    !selectedCategories.includes(cat)
+  );
 
   const resetForm = () => {
     setBusinessName('');
     setOwnerName('');
-    setCategory('');
+    setPhoneNumber('');
+    setYearsInBusiness('');
+    setSelectedCategories([]);
     setAddress('');
-    setContactNumber('');
-    setDeliveryAvailable(false);
-    setPhotos([]);
+    setLocationLink('');
+    setLatitude(null);
+    setLongitude(null);
+    setCategorySearch('');
   };
 
-  const pickImage = async () => {
-    if (photos.length >= 3) {
-      alert('Maximum 3 photos allowed');
+  const addCategory = (category: string) => {
+    if (selectedCategories.length >= 5) {
+      Alert.alert('Limit Reached', 'You can select up to 5 categories.');
       return;
     }
-
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      alert('Camera roll permission needed');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.5,
-      base64: true,
-    });
-
-    if (!result.canceled && result.assets[0].base64) {
-      setPhotos([...photos, `data:image/jpeg;base64,${result.assets[0].base64}`]);
-    }
+    setSelectedCategories([...selectedCategories, category]);
+    setCategorySearch('');
+    setShowCategoryDropdown(false);
   };
 
-  const removePhoto = (index: number) => {
-    setPhotos(photos.filter((_, i) => i !== index));
+  const removeCategory = (category: string) => {
+    setSelectedCategories(selectedCategories.filter(c => c !== category));
+  };
+
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location permission is required.');
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+      setLatitude(location.coords.latitude);
+      setLongitude(location.coords.longitude);
+      setLocationLink(`https://maps.google.com/?q=${location.coords.latitude},${location.coords.longitude}`);
+      Alert.alert('Success', 'Location captured successfully!');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to get location.');
+    }
   };
 
   const handleSubmit = async () => {
-    if (!businessName.trim() || !ownerName.trim() || !category || !contactNumber.trim()) {
-      alert('Please fill all required fields');
+    if (!businessName.trim() || !ownerName.trim() || !phoneNumber.trim() || !yearsInBusiness) {
+      Alert.alert('Missing Information', 'Please fill all required fields.');
+      return;
+    }
+
+    if (selectedCategories.length === 0) {
+      Alert.alert('Missing Categories', 'Please select at least one business category.');
+      return;
+    }
+
+    if (!address.trim()) {
+      Alert.alert('Missing Address', 'Please enter your business address.');
       return;
     }
 
     setLoading(true);
     try {
       await onSubmit({
-        business_name: businessName.trim(),
-        owner_name: ownerName.trim(),
-        category,
+        businessName: businessName.trim(),
+        ownerName: ownerName.trim(),
+        phoneNumber: phoneNumber.trim(),
+        yearsInBusiness: parseInt(yearsInBusiness) || 0,
+        categories: selectedCategories,
         address: address.trim(),
-        contact_number: contactNumber.trim(),
-        delivery_available: deliveryAvailable,
-        photos,
+        locationLink,
+        latitude,
+        longitude,
       });
       resetForm();
       onClose();
     } catch (error) {
       console.error('Error registering vendor:', error);
-      alert('Failed to register vendor');
+      Alert.alert('Error', 'Failed to register. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -117,7 +143,7 @@ export const VendorRegistrationModal: React.FC<VendorRegistrationModalProps> = (
               <View style={styles.iconBg}>
                 <Ionicons name="storefront" size={20} color={COLORS.primary} />
               </View>
-              <Text style={styles.headerTitle}>Register Vendor</Text>
+              <Text style={styles.headerTitle}>Register Your Business</Text>
             </View>
             <TouchableOpacity onPress={onClose}>
               <Ionicons name="close" size={24} color={COLORS.text} />
@@ -145,35 +171,82 @@ export const VendorRegistrationModal: React.FC<VendorRegistrationModalProps> = (
               onChangeText={setOwnerName}
             />
 
-            {/* Category */}
-            <Text style={styles.label}>Category *</Text>
-            <View style={styles.categoryContainer}>
-              {CATEGORIES.map((cat) => (
-                <TouchableOpacity
-                  key={cat}
-                  style={[
-                    styles.categoryBtn,
-                    category === cat && styles.categoryBtnSelected,
-                  ]}
-                  onPress={() => setCategory(cat)}
-                >
-                  <Text
-                    style={[
-                      styles.categoryText,
-                      category === cat && styles.categoryTextSelected,
-                    ]}
-                  >
-                    {cat}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            {/* Phone Number */}
+            <Text style={styles.label}>Phone Number *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Enter phone number"
+              placeholderTextColor={COLORS.textLight}
+              value={phoneNumber}
+              onChangeText={setPhoneNumber}
+              keyboardType="phone-pad"
+            />
+
+            {/* Years in Business */}
+            <Text style={styles.label}>Years in Business *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Enter years (e.g., 5)"
+              placeholderTextColor={COLORS.textLight}
+              value={yearsInBusiness}
+              onChangeText={setYearsInBusiness}
+              keyboardType="number-pad"
+            />
+
+            {/* Business Categories */}
+            <Text style={styles.label}>Business Categories * (Select up to 5)</Text>
+            
+            {/* Selected Categories */}
+            {selectedCategories.length > 0 && (
+              <View style={styles.selectedCategories}>
+                {selectedCategories.map((cat) => (
+                  <View key={cat} style={styles.categoryTag}>
+                    <Text style={styles.categoryTagText}>{cat}</Text>
+                    <TouchableOpacity onPress={() => removeCategory(cat)}>
+                      <Ionicons name="close-circle" size={16} color={COLORS.primary} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Category Search */}
+            <View style={styles.categorySearchContainer}>
+              <Ionicons name="search" size={18} color={COLORS.textLight} />
+              <TextInput
+                style={styles.categorySearchInput}
+                placeholder="Search categories (Gym, Yoga, Restaurant...)"
+                placeholderTextColor={COLORS.textLight}
+                value={categorySearch}
+                onChangeText={(text) => {
+                  setCategorySearch(text);
+                  setShowCategoryDropdown(true);
+                }}
+                onFocus={() => setShowCategoryDropdown(true)}
+              />
             </View>
 
+            {/* Category Dropdown */}
+            {showCategoryDropdown && filteredCategories.length > 0 && (
+              <View style={styles.categoryDropdown}>
+                {filteredCategories.slice(0, 6).map((cat) => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={styles.categoryOption}
+                    onPress={() => addCategory(cat)}
+                  >
+                    <Text style={styles.categoryOptionText}>{cat}</Text>
+                    <Ionicons name="add" size={18} color={COLORS.primary} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
             {/* Address */}
-            <Text style={styles.label}>Address</Text>
+            <Text style={styles.label}>Full Address *</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
-              placeholder="Enter business address"
+              placeholder="Enter complete business address"
               placeholderTextColor={COLORS.textLight}
               value={address}
               onChangeText={setAddress}
@@ -182,48 +255,18 @@ export const VendorRegistrationModal: React.FC<VendorRegistrationModalProps> = (
               textAlignVertical="top"
             />
 
-            {/* Contact Number */}
-            <Text style={styles.label}>Contact Number *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter contact number"
-              placeholderTextColor={COLORS.textLight}
-              value={contactNumber}
-              onChangeText={setContactNumber}
-              keyboardType="phone-pad"
-            />
-
-            {/* Delivery Available */}
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Delivery Available</Text>
-              <Switch
-                value={deliveryAvailable}
-                onValueChange={setDeliveryAvailable}
-                trackColor={{ false: COLORS.divider, true: `${COLORS.primary}50` }}
-                thumbColor={deliveryAvailable ? COLORS.primary : '#f4f3f4'}
-              />
-            </View>
-
-            {/* Business Photos */}
-            <Text style={styles.label}>Business Photos (Max 3)</Text>
-            <View style={styles.photosContainer}>
-              {photos.map((photo, index) => (
-                <View key={index} style={styles.photoWrapper}>
-                  <View style={styles.photoPlaceholder}>
-                    <Ionicons name="image" size={24} color={COLORS.primary} />
-                  </View>
-                  <TouchableOpacity
-                    style={styles.removePhotoBtn}
-                    onPress={() => removePhoto(index)}
-                  >
-                    <Ionicons name="close-circle" size={20} color={COLORS.error} />
-                  </TouchableOpacity>
+            {/* Location */}
+            <Text style={styles.label}>Location Link</Text>
+            <View style={styles.locationContainer}>
+              <TouchableOpacity style={styles.locationButton} onPress={getCurrentLocation}>
+                <Ionicons name="locate" size={18} color={COLORS.primary} />
+                <Text style={styles.locationButtonText}>Get Current Location</Text>
+              </TouchableOpacity>
+              {latitude && longitude && (
+                <View style={styles.locationInfo}>
+                  <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
+                  <Text style={styles.locationInfoText}>Location captured</Text>
                 </View>
-              ))}
-              {photos.length < 3 && (
-                <TouchableOpacity style={styles.addPhotoBtn} onPress={pickImage}>
-                  <Ionicons name="add" size={24} color={COLORS.primary} />
-                </TouchableOpacity>
               )}
             </View>
 
@@ -236,7 +279,7 @@ export const VendorRegistrationModal: React.FC<VendorRegistrationModalProps> = (
               {loading ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.submitBtnText}>Register Vendor</Text>
+                <Text style={styles.submitBtnText}>Register Business</Text>
               )}
             </TouchableOpacity>
 
@@ -309,75 +352,88 @@ const styles = StyleSheet.create({
     height: 80,
     paddingTop: SPACING.md,
   },
-  categoryContainer: {
+  selectedCategories: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: SPACING.sm,
+    marginBottom: SPACING.sm,
   },
-  categoryBtn: {
+  categoryTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.primary}15`,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    borderRadius: 16,
+    gap: 4,
+  },
+  categoryTagText: {
+    fontSize: 13,
+    color: COLORS.primary,
+    fontWeight: '500',
+  },
+  categorySearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: BORDER_RADIUS.md,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
-    borderRadius: 20,
-    backgroundColor: COLORS.background,
     borderWidth: 1,
     borderColor: COLORS.divider,
   },
-  categoryBtnSelected: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  categoryText: {
-    fontSize: 14,
+  categorySearchInput: {
+    flex: 1,
+    marginLeft: SPACING.sm,
+    fontSize: 15,
     color: COLORS.text,
   },
-  categoryTextSelected: {
-    color: '#FFFFFF',
-    fontWeight: '600',
+  categoryDropdown: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    marginTop: SPACING.xs,
   },
-  switchRow: {
+  categoryOption: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: SPACING.lg,
-    paddingVertical: SPACING.sm,
+    padding: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
   },
-  switchLabel: {
-    fontSize: 15,
+  categoryOptionText: {
+    fontSize: 14,
     color: COLORS.text,
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+  },
+  locationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.primary}15`,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    gap: 6,
+  },
+  locationButtonText: {
+    fontSize: 14,
+    color: COLORS.primary,
     fontWeight: '500',
   },
-  photosContainer: {
+  locationInfo: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.sm,
-  },
-  photoWrapper: {
-    position: 'relative',
-  },
-  photoPlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: BORDER_RADIUS.md,
-    backgroundColor: `${COLORS.primary}15`,
-    justifyContent: 'center',
     alignItems: 'center',
+    gap: 4,
   },
-  removePhotoBtn: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-  },
-  addPhotoBtn: {
-    width: 80,
-    height: 80,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 2,
-    borderColor: COLORS.primary,
-    borderStyle: 'dashed',
-    justifyContent: 'center',
-    alignItems: 'center',
+  locationInfoText: {
+    fontSize: 13,
+    color: COLORS.success,
   },
   submitBtn: {
     backgroundColor: COLORS.primary,
