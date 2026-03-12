@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../constants/theme';
@@ -81,17 +82,21 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
   };
 
   const handleSubmit = async () => {
-    // Validation
+    // Validation with user feedback
     if (!description.trim()) {
+      Alert.alert('Required Field', 'Please enter a description for your request.');
       return;
     }
     if (!contactNumber.trim()) {
+      Alert.alert('Required Field', 'Please enter your contact number.');
       return;
     }
     if (requestType === 'Blood' && !bloodGroup) {
+      Alert.alert('Required Field', 'Please select a blood group.');
       return;
     }
     if (requestType === 'Petition' && !petitionTitle.trim()) {
+      Alert.alert('Required Field', 'Please enter a petition title.');
       return;
     }
 
@@ -125,11 +130,13 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
           contact_person_name: contactPersonName,
         }),
       };
+      console.log('Submitting request:', data);
       await onSubmit(data);
       resetForm();
       onClose();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error submitting request:', error);
+      Alert.alert('Error', error?.message || 'Failed to submit request. Please try again.');
     } finally {
       setLoading(false);
     }
