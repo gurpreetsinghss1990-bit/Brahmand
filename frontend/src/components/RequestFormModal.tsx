@@ -28,6 +28,12 @@ const VISIBILITY_OPTIONS = [
   { key: 'national', label: 'National Community', icon: 'flag' },
 ];
 
+const URGENCY_OPTIONS = [
+  { key: 'normal', label: 'Low', color: COLORS.success },
+  { key: 'urgent', label: 'Medium', color: COLORS.warning },
+  { key: 'critical', label: 'High', color: COLORS.error },
+];
+
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
 export const RequestFormModal: React.FC<RequestFormModalProps> = ({
@@ -38,6 +44,7 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [visibility, setVisibility] = useState('area');
+  const [urgency, setUrgency] = useState('normal');
   
   // Common fields
   const [title, setTitle] = useState('');
@@ -61,6 +68,7 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
     setLocation('');
     setAmount('');
     setVisibility('area');
+    setUrgency('normal');
   };
 
   const handleSubmit = async () => {
@@ -69,6 +77,7 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
       const data = {
         type: requestType.toLowerCase(),
         visibility,
+        urgency,
         title,
         description,
         contact_number: contactNumber,
@@ -199,6 +208,32 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
                 />
               </>
             )}
+
+            {/* Urgency Level */}
+            <Text style={styles.label}>Urgency Level</Text>
+            <View style={styles.urgencyContainer}>
+              {URGENCY_OPTIONS.map((option) => (
+                <TouchableOpacity
+                  key={option.key}
+                  style={[
+                    styles.urgencyBtn,
+                    urgency === option.key && { backgroundColor: `${option.color}15`, borderColor: option.color },
+                  ]}
+                  onPress={() => setUrgency(option.key)}
+                >
+                  <View style={[
+                    styles.urgencyDot,
+                    { backgroundColor: option.color },
+                  ]} />
+                  <Text style={[
+                    styles.urgencyText,
+                    urgency === option.key && { color: option.color, fontWeight: '600' },
+                  ]}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
 
             {/* Amount (for Financial requests) */}
             {requestType === 'Financial' && (
@@ -398,6 +433,32 @@ const styles = StyleSheet.create({
   },
   bloodGroupTextSelected: {
     color: '#FFFFFF',
+  },
+  urgencyContainer: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  urgencyBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+  },
+  urgencyDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: SPACING.xs,
+  },
+  urgencyText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
   },
   submitBtn: {
     backgroundColor: COLORS.primary,
