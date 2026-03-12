@@ -228,19 +228,31 @@ export const FloatingUtilityButton = () => {
   };
 
   const handleStopHelp = async () => {
+    console.log('handleStopHelp called, activeRequest:', activeRequest);
+    
+    if (!activeRequest) {
+      Alert.alert('No Request', 'No active help request found.');
+      return;
+    }
+    
     Alert.alert(
       'Resolve Help Request',
       'Has your help request been fulfilled? This will close the request.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Confirm', onPress: async () => {
+          console.log('Confirm pressed, resolving request:', activeRequest.id);
           setLoading(true);
           try {
             await resolveRequest();
+            console.log('Request resolved successfully');
             setModalVisible(false);
             Alert.alert('Success', 'Your help request has been marked as fulfilled.');
-          } catch (error) {
-            Alert.alert('Error', 'Failed to resolve request. Please try again.');
+            // Refresh active request status
+            fetchActiveRequest();
+          } catch (error: any) {
+            console.error('Error resolving request:', error);
+            Alert.alert('Error', error?.message || 'Failed to resolve request. Please try again.');
           } finally {
             setLoading(false);
           }
