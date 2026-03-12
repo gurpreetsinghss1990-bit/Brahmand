@@ -1,55 +1,36 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { 
   View, 
   Text, 
   StyleSheet, 
   TouchableOpacity, 
   Animated,
-  Linking,
-  ScrollView,
-  Dimensions
+  Dimensions,
+  ImageBackground
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '../src/store/authStore';
-import { COLORS, SPACING, BORDER_RADIUS } from '../src/constants/theme';
+import { COLORS, SPACING } from '../src/constants/theme';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
-const FEATURES = [
-  {
-    icon: 'people',
-    title: 'Join Local Hindu Communities',
-    description: 'Connect with devotees in your area',
-  },
-  {
-    icon: 'chatbubbles',
-    title: 'Private Messaging',
-    description: 'Secure conversations with fellow members',
-  },
-  {
-    icon: 'calendar',
-    title: 'Temple Events & Festivals',
-    description: 'Stay updated on pujas and celebrations',
-  },
-  {
-    icon: 'shield-checkmark',
-    title: 'Privacy & Verified Users',
-    description: 'Safe and trusted community',
-  },
-];
+// Subtle mandala pattern SVG as background
+const MandalaPattern = () => (
+  <View style={styles.mandalaContainer}>
+    <View style={styles.mandalaCircle} />
+    <View style={[styles.mandalaCircle, styles.mandalaCircle2]} />
+    <View style={[styles.mandalaCircle, styles.mandalaCircle3]} />
+  </View>
+);
 
 export default function WelcomeScreen() {
   const router = useRouter();
   const { isAuthenticated, user } = useAuthStore();
-  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   
-  // Animation values
-  const fadeAnim = useState(new Animated.Value(0))[0];
-  const slideAnim = useState(new Animated.Value(30))[0];
-  const buttonScale = useState(new Animated.Value(1))[0];
+  const logoOpacity = useRef(new Animated.Value(1)).current;
+  const logoScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -61,35 +42,19 @@ export default function WelcomeScreen() {
     }
   }, [isAuthenticated, user]);
 
-  useEffect(() => {
-    // Start animations
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
-
-  const handleGetStarted = () => {
-    if (!termsAccepted) return;
+  const handleContinue = () => {
+    if (!agreed) return;
     
-    // Button press animation
-    Animated.sequence([
-      Animated.timing(buttonScale, {
-        toValue: 0.95,
-        duration: 100,
+    // Fade out Om logo animation
+    Animated.parallel([
+      Animated.timing(logoOpacity, {
+        toValue: 0,
+        duration: 500,
         useNativeDriver: true,
       }),
-      Animated.timing(buttonScale, {
-        toValue: 1,
-        duration: 100,
+      Animated.timing(logoScale, {
+        toValue: 0.8,
+        duration: 500,
         useNativeDriver: true,
       }),
     ]).start(() => {
@@ -97,271 +62,172 @@ export default function WelcomeScreen() {
     });
   };
 
-  const openTerms = () => {
-    router.push('/settings/guidelines');
-  };
-
-  const openPrivacy = () => {
-    router.push('/settings/guidelines');
-  };
-
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView 
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+    <LinearGradient
+      colors={['#FF6600', '#FF9933']}
+      style={styles.container}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+    >
+      {/* Subtle Mandala Pattern */}
+      <MandalaPattern />
+      
+      {/* Main Content */}
+      <View style={styles.content}>
+        {/* Om Logo */}
         <Animated.View 
           style={[
-            styles.content,
+            styles.logoContainer,
             {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
+              opacity: logoOpacity,
+              transform: [{ scale: logoScale }]
             }
           ]}
         >
-          {/* Logo Section */}
-          <View style={styles.logoSection}>
-            <View style={styles.logoContainer}>
-              <LinearGradient
-                colors={['#FF9933', '#FF6600']}
-                style={styles.logoGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              >
-                <Text style={styles.omSymbol}>ॐ</Text>
-              </LinearGradient>
-            </View>
-            <Text style={styles.appName}>Sanatan Lok</Text>
-            <Text style={styles.tagline}>
-              Connecting Sanatan Communities{'\n'}Across Bharat
-            </Text>
-          </View>
-
-          {/* Features Section */}
-          <View style={styles.featuresSection}>
-            {FEATURES.map((feature, index) => (
-              <View key={index} style={styles.featureItem}>
-                <View style={styles.featureIconContainer}>
-                  <Ionicons name={feature.icon as any} size={22} color={COLORS.primary} />
-                </View>
-                <View style={styles.featureTextContainer}>
-                  <Text style={styles.featureTitle}>{feature.title}</Text>
-                  <Text style={styles.featureDescription}>{feature.description}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-
-          {/* Terms Checkbox */}
-          <TouchableOpacity 
-            style={styles.termsContainer}
-            onPress={() => setTermsAccepted(!termsAccepted)}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.checkbox, termsAccepted && styles.checkboxChecked]}>
-              {termsAccepted && (
-                <Ionicons name="checkmark" size={16} color={COLORS.textWhite} />
-              )}
-            </View>
-            <Text style={styles.termsText}>
-              I agree to the{' '}
-              <Text style={styles.termsLink} onPress={openTerms}>
-                Terms of Service
-              </Text>
-              {' '}and{' '}
-              <Text style={styles.termsLink} onPress={openPrivacy}>
-                Community Guidelines
-              </Text>
-              {' '}of Sanatan Lok.
-            </Text>
-          </TouchableOpacity>
-
-          {/* Get Started Button */}
-          <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
-            <TouchableOpacity
-              onPress={handleGetStarted}
-              activeOpacity={0.9}
-              disabled={!termsAccepted}
-            >
-              <LinearGradient
-                colors={termsAccepted ? ['#FF9933', '#FF6600'] : ['#CCCCCC', '#AAAAAA']}
-                style={[styles.button, !termsAccepted && styles.buttonDisabled]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-              >
-                <Text style={styles.buttonText}>Get Started</Text>
-                <View style={styles.buttonIconContainer}>
-                  <Ionicons name="arrow-forward" size={20} color={COLORS.textWhite} />
-                </View>
-              </LinearGradient>
-            </TouchableOpacity>
-          </Animated.View>
-
-          {/* Subtle Footer */}
-          <Text style={styles.footerText}>
-            Join thousands of devotees across Bharat
-          </Text>
+          <Text style={styles.omSymbol}>ॐ</Text>
         </Animated.View>
-      </ScrollView>
-    </SafeAreaView>
+
+        {/* App Name */}
+        <Text style={styles.appName}>Brahmand</Text>
+        <Text style={styles.tagline}>The Sanatan Community</Text>
+      </View>
+
+      {/* Bottom Section */}
+      <View style={styles.bottomSection}>
+        {/* Terms Checkbox */}
+        <TouchableOpacity 
+          style={styles.checkboxContainer}
+          onPress={() => setAgreed(!agreed)}
+          activeOpacity={0.8}
+        >
+          <View style={[styles.checkbox, agreed && styles.checkboxChecked]}>
+            {agreed && <Text style={styles.checkmark}>✓</Text>}
+          </View>
+          <Text style={styles.termsText}>
+            I agree to the Terms of Service and Community Guidelines
+          </Text>
+        </TouchableOpacity>
+
+        {/* Continue Button */}
+        <TouchableOpacity
+          style={[styles.continueButton, !agreed && styles.continueButtonDisabled]}
+          onPress={handleContinue}
+          disabled={!agreed}
+          activeOpacity={0.9}
+        >
+          <Text style={styles.continueButtonText}>Continue</Text>
+        </TouchableOpacity>
+      </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFAF5',
   },
-  scrollContent: {
-    flexGrow: 1,
+  mandalaContainer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    opacity: 0.08,
+  },
+  mandalaCircle: {
+    position: 'absolute',
+    width: width * 1.2,
+    height: width * 1.2,
+    borderRadius: width * 0.6,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  mandalaCircle2: {
+    width: width * 0.9,
+    height: width * 0.9,
+    borderRadius: width * 0.45,
+  },
+  mandalaCircle3: {
+    width: width * 0.6,
+    height: width * 0.6,
+    borderRadius: width * 0.3,
   },
   content: {
     flex: 1,
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.xl,
-    paddingBottom: SPACING.xl * 2,
-  },
-  logoSection: {
-    alignItems: 'center',
-    marginBottom: SPACING.xl * 1.5,
-  },
-  logoContainer: {
-    marginBottom: SPACING.lg,
-  },
-  logoGradient: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#FF6600',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 12,
+    paddingHorizontal: SPACING.lg,
+  },
+  logoContainer: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.xl,
   },
   omSymbol: {
-    fontSize: 72,
-    color: COLORS.textWhite,
+    fontSize: 100,
+    color: '#FFFFFF',
     fontWeight: '300',
   },
   appName: {
-    fontSize: 36,
-    fontWeight: '800',
-    color: '#1A1A1A',
-    letterSpacing: -0.5,
-    marginBottom: SPACING.sm,
+    fontSize: 42,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 1,
+    marginBottom: SPACING.xs,
   },
   tagline: {
-    fontSize: 16,
-    color: '#666666',
-    textAlign: 'center',
-    lineHeight: 24,
+    fontSize: 18,
+    color: 'rgba(255,255,255,0.9)',
+    letterSpacing: 0.5,
   },
-  featuresSection: {
-    backgroundColor: COLORS.surface,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.xl,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+  bottomSection: {
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.xl * 2,
   },
-  featureItem: {
+  checkboxContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: SPACING.md,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  featureIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#FFF5EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: SPACING.md,
-  },
-  featureTextContainer: {
-    flex: 1,
-  },
-  featureTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 2,
-  },
-  featureDescription: {
-    fontSize: 13,
-    color: '#888888',
-  },
-  termsContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
     marginBottom: SPACING.lg,
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
   },
   checkbox: {
     width: 24,
     height: 24,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: COLORS.primary,
+    borderColor: 'rgba(255,255,255,0.8)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: SPACING.md,
-    marginTop: 2,
   },
   checkboxChecked: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
+  },
+  checkmark: {
+    color: COLORS.primary,
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   termsText: {
     flex: 1,
     fontSize: 14,
-    color: '#444444',
-    lineHeight: 22,
+    color: 'rgba(255,255,255,0.9)',
+    lineHeight: 20,
   },
-  termsLink: {
-    color: COLORS.primary,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
-  button: {
-    flexDirection: 'row',
+  continueButton: {
+    backgroundColor: '#FFFFFF',
+    paddingVertical: SPACING.md + 2,
+    borderRadius: 30,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.md + 4,
-    borderRadius: BORDER_RADIUS.lg,
-    marginBottom: SPACING.lg,
   },
-  buttonDisabled: {
-    opacity: 0.7,
+  continueButtonDisabled: {
+    backgroundColor: 'rgba(255,255,255,0.4)',
   },
-  buttonText: {
-    color: COLORS.textWhite,
+  continueButtonText: {
     fontSize: 18,
-    fontWeight: '700',
-    marginRight: SPACING.sm,
-  },
-  buttonIconContainer: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  footerText: {
-    fontSize: 13,
-    color: '#AAAAAA',
-    textAlign: 'center',
+    fontWeight: '600',
+    color: COLORS.primary,
   },
 });

@@ -1,98 +1,62 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator, Animated } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  ScrollView, 
+  TouchableOpacity, 
+  RefreshControl,
+  FlatList 
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { getCommunities, getTodaysWisdom, getTodaysPanchang, getCommunityStats, getVerificationStatus } from '../../src/services/api';
-import { Community } from '../../src/types';
-import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
+import { useFocusEffect } from '@react-navigation/native';
+import { getCommunities, getCommunityMessages } from '../../src/services/api';
+import { useAuthStore } from '../../src/store/authStore';
+import { COLORS, SPACING } from '../../src/constants/theme';
+import { FloatingUtilityButton } from '../../src/components/FloatingUtilityButton';
 
-interface WisdomQuote {
-  quote: string;
-  source: string;
-}
+const TABS = ['Chat', 'Help', 'Blood', 'Medical', 'Financial', 'Petition'];
 
-interface PanchangData {
-  tithi: string;
-  sunrise: string;
-  sunset: string;
-  vrat: string | null;
-  paksha: string;
-}
-
-interface CommunityWithStats extends Community {
-  new_messages?: number;
+interface Community {
+  id: string;
+  name: string;
+  type: string;
   label?: string;
+  member_count: number;
   is_default?: boolean;
-  sort_order?: number;
 }
 
-export default function HomeScreen() {
+export default function CommunityScreen() {
   const router = useRouter();
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  
-  const [communities, setCommunities] = useState<CommunityWithStats[]>([]);
-  const [wisdom, setWisdom] = useState<WisdomQuote | null>(null);
-  const [panchang, setPanchang] = useState<PanchangData | null>(null);
-  const [isVerified, setIsVerified] = useState(false);
+  const { user } = useAuthStore();
+  const [activeTab, setActiveTab] = useState('Chat');
+  const [communities, setCommunities] = useState<Community[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = useCallback(async () => {
+  const fetchCommunities = useCallback(async () => {
     try {
-      const [communitiesRes, wisdomRes, panchangRes, verificationRes] = await Promise.all([
-        getCommunities(),
-        getTodaysWisdom(),
-        getTodaysPanchang(),
-        getVerificationStatus()
-      ]);
-      
-      // Fetch stats for each community
-      const communitiesWithStats = await Promise.all(
-        communitiesRes.data.map(async (c: Community) => {
-          try {
-            const stats = await getCommunityStats(c.id);
-            return { ...c, new_messages: stats.data.new_messages };
-          } catch {
-            return { ...c, new_messages: 0 };
-          }
-        })
-      );
-      
-      setCommunities(communitiesWithStats);
-      setWisdom(wisdomRes.data);
-      setPanchang(panchangRes.data);
-      setIsVerified(verificationRes.data.is_verified);
-      
-      // Animate wisdom card
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 1000,
-        useNativeDriver: true,
-      }).start();
+      const res = await getCommunities();
+      setCommunities(res.data || []);
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('Error fetching communities:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [fadeAnim]);
+  }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    fadeAnim.setValue(0);
-    fetchData();
-  };
+  useFocusEffect(
+    useCallback(() => {
+      fetchCommunities();
+    }, [fetchCommunities])
+  );
 
   const getCommunityIcon = (type: string) => {
     switch (type) {
       case 'home_area': return 'home';
       case 'office_area': return 'business';
-      case 'area': return 'home';
       case 'city': return 'location';
       case 'state': return 'map';
       case 'country': return 'flag';
@@ -104,17 +68,15 @@ export default function HomeScreen() {
     switch (type) {
       case 'home_area': return COLORS.success;
       case 'office_area': return COLORS.info;
-      case 'area': return COLORS.success;
-      case 'city': return '#9B59B6'; // Purple
+      case 'city': return '#9B59B6';
       case 'state': return COLORS.warning;
       case 'country': return COLORS.primary;
       default: return COLORS.textSecondary;
     }
   };
 
-  const renderCommunity = ({ item }: { item: CommunityWithStats }) => (
+  const renderCommunity = ({ item }: { item: Community }) => (
     <View>
-      {/* Label above card */}
       {item.label && (
         <Text style={[styles.communityLabel, { color: getCommunityColor(item.type) }]}>
           {item.label}
@@ -123,148 +85,64 @@ export default function HomeScreen() {
       <TouchableOpacity
         style={styles.communityCard}
         onPress={() => router.push(`/community/${item.id}`)}
-        activeOpacity={0.7}
       >
-        <View style={[styles.communityIcon, { backgroundColor: `${getCommunityColor(item.type)}20` }]}>
+        <View style={[styles.communityIcon, { backgroundColor: `${getCommunityColor(item.type)}15` }]}>
           <Ionicons name={getCommunityIcon(item.type)} size={24} color={getCommunityColor(item.type)} />
         </View>
         <View style={styles.communityInfo}>
           <Text style={styles.communityName}>{item.name}</Text>
-          <Text style={styles.communityStats}>
-            {item.new_messages ? `${item.new_messages} new messages` : `${item.member_count} members`}
-          </Text>
+          <Text style={styles.communityStats}>{item.member_count} members</Text>
         </View>
         {item.is_default && (
-          <View style={styles.defaultBadge}>
-            <Ionicons name="lock-closed" size={12} color={COLORS.textLight} />
-          </View>
+          <Ionicons name="lock-closed" size={14} color={COLORS.textLight} style={{ marginRight: 8 }} />
         )}
-        {item.new_messages ? (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{item.new_messages}</Text>
-          </View>
-        ) : null}
         <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
       </TouchableOpacity>
     </View>
   );
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
+      {/* Top Tabs */}
+      <View style={styles.tabsContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll}>
+          {TABS.map((tab) => (
+            <TouchableOpacity
+              key={tab}
+              style={[styles.tab, activeTab === tab && styles.tabActive]}
+              onPress={() => setActiveTab(tab)}
+            >
+              <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+                {tab}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+        <TouchableOpacity style={styles.addButton}>
+          <Ionicons name="add" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Community List */}
       <FlatList
         data={communities}
         renderItem={renderCommunity}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />
+          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchCommunities(); }} />
         }
-        ListHeaderComponent={
-          <>
-            {/* Today's Wisdom Card */}
-            <Animated.View style={[styles.wisdomContainer, { opacity: fadeAnim }]}>
-              <LinearGradient
-                colors={['#FF9F43', '#FF6B00']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.wisdomCard}
-              >
-                <View style={styles.wisdomHeader}>
-                  <Text style={styles.lotusIcon}>🪷</Text>
-                  <Text style={styles.wisdomTitle}>Today's Wisdom</Text>
-                </View>
-                {wisdom && (
-                  <>
-                    <Text style={styles.wisdomQuote}>"{wisdom.quote}"</Text>
-                    <Text style={styles.wisdomSource}>– {wisdom.source}</Text>
-                  </>
-                )}
-              </LinearGradient>
-            </Animated.View>
-
-            {/* Verification Banner */}
-            {!isVerified && (
-              <TouchableOpacity 
-                style={styles.verificationBanner}
-                onPress={() => router.push('/verification')}
-              >
-                <View style={styles.verificationIcon}>
-                  <Ionicons name="shield-checkmark" size={24} color={COLORS.warning} />
-                </View>
-                <View style={styles.verificationInfo}>
-                  <Text style={styles.verificationTitle}>Community Verification</Text>
-                  <Text style={styles.verificationText}>
-                    Verify to participate in community discussions
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.warning} />
-              </TouchableOpacity>
-            )}
-
-            {/* Communities Section Header */}
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Your Communities</Text>
-              <TouchableOpacity onPress={() => router.push('/(tabs)/discover')}>
-                <Text style={styles.seeAllText}>Discover</Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        }
-        ListFooterComponent={
-          <>
-            {/* Today's Panchang Card */}
-            {panchang && (
-              <TouchableOpacity style={styles.panchangCard} onPress={() => router.push('/panchang')}>
-                <View style={styles.panchangHeader}>
-                  <Ionicons name="sunny" size={20} color={COLORS.primary} />
-                  <Text style={styles.panchangTitle}>Today in Sanatan</Text>
-                </View>
-                <View style={styles.panchangGrid}>
-                  <View style={styles.panchangItem}>
-                    <Text style={styles.panchangLabel}>Tithi</Text>
-                    <Text style={styles.panchangValue}>{panchang.tithi}</Text>
-                  </View>
-                  <View style={styles.panchangItem}>
-                    <Text style={styles.panchangLabel}>Sunrise</Text>
-                    <Text style={styles.panchangValue}>{panchang.sunrise}</Text>
-                  </View>
-                  <View style={styles.panchangItem}>
-                    <Text style={styles.panchangLabel}>Sunset</Text>
-                    <Text style={styles.panchangValue}>{panchang.sunset}</Text>
-                  </View>
-                  {panchang.vrat && (
-                    <View style={styles.panchangItem}>
-                      <Text style={styles.panchangLabel}>Vrat</Text>
-                      <Text style={[styles.panchangValue, styles.vratText]}>{panchang.vrat}</Text>
-                    </View>
-                  )}
-                </View>
-                <View style={styles.panchangFooter}>
-                  <Text style={styles.panchangFooterText}>Tap for full Panchang</Text>
-                  <Ionicons name="chevron-forward" size={16} color={COLORS.textLight} />
-                </View>
-              </TouchableOpacity>
-            )}
-            <View style={styles.bottomPadding} />
-          </>
-        }
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="people-outline" size={64} color={COLORS.textLight} />
-            <Text style={styles.emptyTitle}>No Communities Yet</Text>
-            <Text style={styles.emptyText}>Set up your location to join local communities</Text>
+          <View style={styles.emptyState}>
+            <Ionicons name="people-outline" size={48} color={COLORS.textLight} />
+            <Text style={styles.emptyText}>No communities yet</Text>
+            <Text style={styles.emptySubtext}>Set up your location to join communities</Text>
           </View>
         }
       />
+
+      {/* Floating Utility Button */}
+      <FloatingUtilityButton />
     </View>
   );
 }
@@ -274,108 +152,43 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  tabsContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+    paddingVertical: SPACING.sm,
   },
-  listContent: {
+  tabsScroll: {
+    flex: 1,
+  },
+  tab: {
     paddingHorizontal: SPACING.md,
-  },
-  // Wisdom Card Styles
-  wisdomContainer: {
-    marginTop: SPACING.md,
-    marginBottom: SPACING.lg,
-  },
-  wisdomCard: {
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.lg,
-    shadowColor: '#FF6B00',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  wisdomHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  lotusIcon: {
-    fontSize: 20,
-    marginRight: SPACING.sm,
-  },
-  wisdomTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.9)',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  wisdomQuote: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    lineHeight: 24,
-    fontStyle: 'italic',
-    marginBottom: SPACING.sm,
-  },
-  wisdomSource: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.8)',
-    textAlign: 'right',
-  },
-  // Verification Banner
-  verificationBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: `${COLORS.warning}15`,
-    borderRadius: BORDER_RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.lg,
-    borderWidth: 1,
-    borderColor: `${COLORS.warning}30`,
-  },
-  verificationIcon: {
-    width: 40,
-    height: 40,
+    paddingVertical: SPACING.sm,
+    marginLeft: SPACING.sm,
     borderRadius: 20,
-    backgroundColor: `${COLORS.warning}20`,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: SPACING.md,
   },
-  verificationInfo: {
-    flex: 1,
+  tabActive: {
+    backgroundColor: `${COLORS.primary}15`,
   },
-  verificationTitle: {
+  tabText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  verificationText: {
-    fontSize: 12,
     color: COLORS.textSecondary,
-    marginTop: 2,
-  },
-  // Section Header
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  seeAllText: {
-    fontSize: 14,
-    color: COLORS.primary,
     fontWeight: '500',
   },
-  // Community Card Styles
+  tabTextActive: {
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  addButton: {
+    padding: SPACING.sm,
+    marginRight: SPACING.sm,
+  },
+  listContent: {
+    padding: SPACING.md,
+    paddingBottom: 100,
+  },
   communityLabel: {
     fontSize: 11,
     fontWeight: '600',
@@ -391,11 +204,6 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     borderRadius: 16,
     marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
   },
   communityIcon: {
     width: 48,
@@ -412,106 +220,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.text,
-    marginBottom: 2,
   },
   communityStats: {
     fontSize: 13,
     color: COLORS.textSecondary,
+    marginTop: 2,
   },
-  badge: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    marginRight: SPACING.sm,
-  },
-  badgeText: {
-    color: COLORS.textWhite,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  defaultBadge: {
-    marginRight: SPACING.sm,
-  },
-  separator: {
-    height: SPACING.sm,
-  },
-  // Panchang Card Styles
-  panchangCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginTop: SPACING.lg,
-  },
-  panchangHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-    paddingBottom: SPACING.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.divider,
-  },
-  panchangTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginLeft: SPACING.sm,
-  },
-  panchangGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  panchangItem: {
-    width: '50%',
-    paddingVertical: SPACING.sm,
-  },
-  panchangLabel: {
-    fontSize: 12,
-    color: COLORS.textLight,
-    marginBottom: 2,
-  },
-  panchangValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  vratText: {
-    color: COLORS.primary,
-  },
-  panchangFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: SPACING.sm,
-    paddingTop: SPACING.sm,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.divider,
-  },
-  panchangFooterText: {
-    fontSize: 12,
-    color: COLORS.textLight,
-    marginRight: SPACING.xs,
-  },
-  // Empty State
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  emptyState: {
     alignItems: 'center',
     paddingVertical: SPACING.xl * 2,
   },
-  emptyTitle: {
-    fontSize: 20,
+  emptyText: {
+    fontSize: 18,
     fontWeight: '600',
     color: COLORS.text,
-    marginTop: SPACING.lg,
-    marginBottom: SPACING.sm,
+    marginTop: SPACING.md,
   },
-  emptyText: {
+  emptySubtext: {
     fontSize: 14,
     color: COLORS.textSecondary,
-    textAlign: 'center',
-  },
-  bottomPadding: {
-    height: SPACING.xl,
+    marginTop: SPACING.xs,
   },
 });

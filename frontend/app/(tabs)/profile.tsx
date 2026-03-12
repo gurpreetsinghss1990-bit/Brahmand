@@ -1,50 +1,54 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Modal, TextInput, Platform } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  ScrollView, 
+  TouchableOpacity, 
+  Image,
+  RefreshControl,
+  Alert
+} from 'react-native';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/authStore';
+import { getUserProfile } from '../../src/services/api';
 import { Avatar } from '../../src/components/Avatar';
-import { Badge } from '../../src/components/Badge';
-import { Button } from '../../src/components/Button';
-import { getProfileCompletion, updateExtendedProfile, getHoroscope, getVerificationStatus } from '../../src/services/api';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
+
+const MENU_ITEMS = [
+  { id: 'edit', icon: 'person-circle', label: 'Edit Profile', route: '/profile/edit' },
+  { id: 'location', icon: 'location', label: 'Change Location', route: '/settings/location' },
+  { id: 'settings', icon: 'settings', label: 'Settings', route: '/settings' },
+  { id: 'privacy', icon: 'shield-checkmark', label: 'Privacy', route: '/settings/privacy' },
+  { id: 'notifications', icon: 'notifications', label: 'Notifications', route: '/settings/notifications' },
+  { id: 'kyc', icon: 'document-text', label: 'KYC Verification', route: '/kyc' },
+  { id: 'badges', icon: 'ribbon', label: 'Community Badges', route: '/badges' },
+];
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, logout, updateUser } = useAuthStore();
-  
-  const [profileCompletion, setProfileCompletion] = useState<any>(null);
-  const [horoscope, setHoroscope] = useState<any>(null);
-  const [isVerified, setIsVerified] = useState(false);
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [editField, setEditField] = useState<{ key: string; label: string; value: string } | null>(null);
+  const { user, logout } = useAuthStore();
+  const [refreshing, setRefreshing] = useState(false);
+  const [profile, setProfile] = useState<any>(null);
 
-  useEffect(() => {
-    fetchProfileData();
+  const fetchProfile = useCallback(async () => {
+    try {
+      const res = await getUserProfile();
+      setProfile(res.data);
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+    } finally {
+      setRefreshing(false);
+    }
   }, []);
 
-  const fetchProfileData = async () => {
-    try {
-      const [completionRes, verificationRes] = await Promise.all([
-        getProfileCompletion(),
-        getVerificationStatus(),
-      ]);
-      setProfileCompletion(completionRes.data);
-      setIsVerified(verificationRes.data.is_verified);
-
-      // Fetch horoscope if eligible
-      if (completionRes.data.horoscope_eligible) {
-        try {
-          const horoscopeRes = await getHoroscope();
-          setHoroscope(horoscopeRes.data);
-        } catch (e) {
-          console.log('Horoscope not available');
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching profile data:', error);
-    }
-  };
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfile();
+    }, [fetchProfile])
+  );
 
   const handleLogout = () => {
     Alert.alert(
@@ -52,273 +56,94 @@ export default function ProfileScreen() {
       'Are you sure you want to logout?',
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            router.replace('/');
-          },
-        },
+        { text: 'Logout', style: 'destructive', onPress: () => {
+          logout();
+          router.replace('/');
+        }},
       ]
     );
   };
 
-  const handleEditField = (key: string, label: string, currentValue: string = '') => {
-    setEditField({ key, label, value: currentValue });
-    setEditModalVisible(true);
-  };
-
-  const handleSaveField = async () => {
-    if (!editField) return;
-
-    try {
-      const updateData = { [editField.key]: editField.value };
-      await updateExtendedProfile(updateData);
-      updateUser({ [editField.key]: editField.value } as any);
-      setEditModalVisible(false);
-      fetchProfileData();
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update profile');
-    }
-  };
-
-  if (!user) return null;
-
-  const extendedFields = [
-    { key: 'kuldevi', label: 'Kuldevi', icon: 'flower' },
-    { key: 'kuldevi_temple_area', label: 'Kuldevi Temple Area', icon: 'location' },
-    { key: 'gotra', label: 'Gotra', icon: 'git-branch' },
-    { key: 'date_of_birth', label: 'Date of Birth', icon: 'calendar' },
-    { key: 'place_of_birth', label: 'Place of Birth', icon: 'navigate' },
-    { key: 'time_of_birth', label: 'Time of Birth', icon: 'time' },
-  ];
+  const displayUser = profile || user;
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView 
+      style={styles.container}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchProfile(); }} />
+      }
+    >
       {/* Profile Header */}
       <View style={styles.header}>
-        <Avatar name={user.name} photo={user.photo} size={100} />
-        <Text style={styles.name}>{user.name}</Text>
-        <View style={styles.slIdContainer}>
-          <Text style={styles.slIdLabel}>Sanatan Lok ID</Text>
-          <Text style={styles.slId}>{user.sl_id}</Text>
+        <View style={styles.avatarContainer}>
+          {displayUser?.photo ? (
+            <Image source={{ uri: displayUser.photo }} style={styles.avatar} />
+          ) : (
+            <Avatar name={displayUser?.name || 'User'} size={100} />
+          )}
+          {displayUser?.is_verified && (
+            <View style={styles.verifiedBadge}>
+              <Ionicons name="checkmark-circle" size={24} color={COLORS.success} />
+            </View>
+          )}
         </View>
+        <Text style={styles.userName}>{displayUser?.name || 'User'}</Text>
+        <Text style={styles.userId}>{displayUser?.sl_id || ''}</Text>
         
-        {/* Verification Badge */}
-        <View style={[styles.memberTypeBadge, isVerified ? styles.verifiedBadge : styles.basicBadge]}>
-          <Ionicons 
-            name={isVerified ? 'shield-checkmark' : 'person'} 
-            size={14} 
-            color={isVerified ? COLORS.success : COLORS.warning} 
-          />
-          <Text style={[styles.memberTypeText, { color: isVerified ? COLORS.success : COLORS.warning }]}>
-            {isVerified ? 'Verified Member' : 'Basic Member'}
-          </Text>
-        </View>
+        {/* Location Info */}
+        {displayUser?.home_location && (
+          <View style={styles.locationRow}>
+            <Ionicons name="location" size={14} color={COLORS.textSecondary} />
+            <Text style={styles.locationText}>
+              {displayUser.home_location.area}, {displayUser.home_location.city}
+            </Text>
+          </View>
+        )}
       </View>
 
-      {/* Verification Banner (if not verified) */}
-      {!isVerified && (
-        <TouchableOpacity 
-          style={styles.verificationBanner}
-          onPress={() => router.push('/verification')}
-        >
-          <Ionicons name="shield-checkmark" size={24} color={COLORS.warning} />
-          <View style={styles.verificationInfo}>
-            <Text style={styles.verificationTitle}>Verify Your Account</Text>
-            <Text style={styles.verificationText}>Get full access to community features</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={COLORS.warning} />
-        </TouchableOpacity>
-      )}
-
-      {/* Profile Completion */}
-      {profileCompletion && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Profile Completion</Text>
-          <View style={styles.completionCard}>
-            <View style={styles.completionHeader}>
-              <Text style={styles.completionPercent}>{profileCompletion.completion_percentage}%</Text>
-              <Text style={styles.completionText}>Complete</Text>
-            </View>
-            <View style={styles.completionBar}>
-              <View style={[styles.completionFill, { width: `${profileCompletion.completion_percentage}%` }]} />
-            </View>
-          </View>
-        </View>
-      )}
-
-      {/* Badges */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Badges</Text>
-        <View style={styles.badgeContainer}>
-          {user.badges?.map((badge, index) => (
-            <Badge key={index} name={badge} size="medium" />
-          ))}
-        </View>
-      </View>
-
-      {/* Stats */}
-      <View style={styles.statsContainer}>
+      {/* Stats Row */}
+      <View style={styles.statsRow}>
         <View style={styles.statItem}>
-          <Text style={styles.statNumber}>{user.communities?.length || 0}</Text>
+          <Text style={styles.statValue}>{displayUser?.communities?.length || 0}</Text>
           <Text style={styles.statLabel}>Communities</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
-          <Text style={styles.statNumber}>{user.circles?.length || 0}</Text>
-          <Text style={styles.statLabel}>Circles</Text>
+          <Text style={styles.statValue}>{displayUser?.badges?.length || 0}</Text>
+          <Text style={styles.statLabel}>Badges</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
-          <Text style={styles.statNumber}>{user.reputation || 0}</Text>
+          <Text style={styles.statValue}>{displayUser?.reputation || 0}</Text>
           <Text style={styles.statLabel}>Reputation</Text>
         </View>
       </View>
 
-      {/* Horoscope Section (if eligible) */}
-      {horoscope && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Daily Horoscope</Text>
-          <View style={styles.horoscopeCard}>
-            <View style={styles.horoscopeHeader}>
-              <View style={styles.zodiacBadge}>
-                <Ionicons name="star" size={16} color={COLORS.accent} />
-                <Text style={styles.zodiacText}>{horoscope.zodiac_sign}</Text>
-              </View>
-              <View style={styles.luckyInfo}>
-                <Text style={styles.luckyLabel}>Lucky: </Text>
-                <Text style={styles.luckyValue}>{horoscope.lucky_color} | {horoscope.lucky_number}</Text>
-              </View>
-            </View>
-            <Text style={styles.horoscopeText}>{horoscope.daily_horoscope}</Text>
-            <Text style={styles.auspiciousTime}>Auspicious Time: {horoscope.auspicious_time}</Text>
-          </View>
-        </View>
-      )}
-
-      {/* Extended Profile Fields */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Spiritual Profile</Text>
-        <Text style={styles.sectionSubtitle}>Complete for personalized horoscope</Text>
-        
-        {extendedFields.map((field) => (
+      {/* Menu Items */}
+      <View style={styles.menuSection}>
+        {MENU_ITEMS.map((item) => (
           <TouchableOpacity
-            key={field.key}
-            style={styles.fieldRow}
-            onPress={() => handleEditField(field.key, field.label, (user as any)[field.key] || '')}
+            key={item.id}
+            style={styles.menuItem}
+            onPress={() => router.push(item.route as any)}
           >
-            <View style={styles.fieldIcon}>
-              <Ionicons name={field.icon as any} size={18} color={COLORS.primary} />
+            <View style={styles.menuIconContainer}>
+              <Ionicons name={item.icon as any} size={22} color={COLORS.primary} />
             </View>
-            <View style={styles.fieldInfo}>
-              <Text style={styles.fieldLabel}>{field.label}</Text>
-              <Text style={styles.fieldValue}>
-                {(user as any)[field.key] || 'Tap to add'}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={COLORS.textLight} />
+            <Text style={styles.menuLabel}>{item.label}</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
           </TouchableOpacity>
         ))}
       </View>
 
-      {/* Location */}
-      {user.location && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Location</Text>
-          <View style={styles.locationCard}>
-            <Ionicons name="location" size={20} color={COLORS.primary} />
-            <Text style={styles.locationText}>
-              {user.location.area}, {user.location.city}, {user.location.state}
-            </Text>
-          </View>
-        </View>
-      )}
-
-      {/* Share ID */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Share Your ID</Text>
-        <View style={styles.shareCard}>
-          <Text style={styles.shareText}>Share your Sanatan Lok ID to connect</Text>
-          <View style={styles.shareIdBox}>
-            <Text style={styles.shareIdText}>{user.sl_id}</Text>
-            <TouchableOpacity style={styles.copyButton}>
-              <Ionicons name="copy" size={20} color={COLORS.primary} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-
-      {/* Settings Section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Settings</Text>
-        <View style={styles.settingsCard}>
-          <TouchableOpacity 
-            style={styles.settingsItem}
-            onPress={() => router.push('/settings/location')}
-          >
-            <View style={[styles.settingsIcon, { backgroundColor: `${COLORS.success}15` }]}>
-              <Ionicons name="location" size={20} color={COLORS.success} />
-            </View>
-            <View style={styles.settingsInfo}>
-              <Text style={styles.settingsLabel}>Change Location</Text>
-              <Text style={styles.settingsDesc}>Update home or office area</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.settingsItem}
-            onPress={() => router.push('/settings/privacy')}
-          >
-            <View style={[styles.settingsIcon, { backgroundColor: `${COLORS.primary}15` }]}>
-              <Ionicons name="shield-checkmark" size={20} color={COLORS.primary} />
-            </View>
-            <View style={styles.settingsInfo}>
-              <Text style={styles.settingsLabel}>Privacy Settings</Text>
-              <Text style={styles.settingsDesc}>Read receipts, online status</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.settingsItem}
-            onPress={() => router.push('/settings/guidelines')}
-          >
-            <View style={[styles.settingsIcon, { backgroundColor: `${COLORS.warning}15` }]}>
-              <Ionicons name="document-text" size={20} color={COLORS.warning} />
-            </View>
-            <View style={styles.settingsInfo}>
-              <Text style={styles.settingsLabel}>Community Guidelines</Text>
-              <Text style={styles.settingsDesc}>Rules and conduct</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.settingsItem}>
-            <View style={[styles.settingsIcon, { backgroundColor: `${COLORS.secondary}15` }]}>
-              <Ionicons name="notifications" size={20} color={COLORS.secondary} />
-            </View>
-            <View style={styles.settingsInfo}>
-              <Text style={styles.settingsLabel}>Notifications</Text>
-              <Text style={styles.settingsDesc}>Push notifications, alerts</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.settingsItem}>
-            <View style={[styles.settingsIcon, { backgroundColor: `${COLORS.accent}15` }]}>
-              <Ionicons name="help-circle" size={20} color={COLORS.accent} />
-            </View>
-            <View style={styles.settingsInfo}>
-              <Text style={styles.settingsLabel}>Help & Support</Text>
-              <Text style={styles.settingsDesc}>FAQs, contact us</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
-          </TouchableOpacity>
-        </View>
-      </View>
+      {/* Guidelines Link */}
+      <TouchableOpacity 
+        style={styles.guidelinesLink}
+        onPress={() => router.push('/settings/guidelines')}
+      >
+        <Ionicons name="document-text" size={18} color={COLORS.info} />
+        <Text style={styles.guidelinesText}>Community Guidelines</Text>
+      </TouchableOpacity>
 
       {/* Logout Button */}
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -326,34 +151,7 @@ export default function ProfileScreen() {
         <Text style={styles.logoutText}>Logout</Text>
       </TouchableOpacity>
 
-      <View style={styles.bottomPadding} />
-
-      {/* Edit Modal */}
-      <Modal
-        visible={editModalVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setEditModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Edit {editField?.label}</Text>
-              <TouchableOpacity onPress={() => setEditModalVisible(false)}>
-                <Ionicons name="close" size={24} color={COLORS.text} />
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              style={styles.modalInput}
-              value={editField?.value || ''}
-              onChangeText={(text) => setEditField(prev => prev ? { ...prev, value: text } : null)}
-              placeholder={`Enter ${editField?.label}`}
-              placeholderTextColor={COLORS.textLight}
-            />
-            <Button title="Save" onPress={handleSaveField} />
-          </View>
-        </View>
-      </Modal>
+      <View style={{ height: 100 }} />
     </ScrollView>
   );
 }
@@ -365,136 +163,64 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    padding: SPACING.xl,
+    paddingVertical: SPACING.xl,
     backgroundColor: COLORS.surface,
-    borderBottomLeftRadius: BORDER_RADIUS.xl,
-    borderBottomRightRadius: BORDER_RADIUS.xl,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
   },
-  name: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginTop: SPACING.md,
+  avatarContainer: {
+    position: 'relative',
+    marginBottom: SPACING.md,
   },
-  slIdContainer: {
-    alignItems: 'center',
-    marginTop: SPACING.sm,
-  },
-  slIdLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  slId: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.primary,
-    marginTop: 2,
-  },
-  memberTypeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
-    marginTop: SPACING.sm,
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    borderColor: COLORS.primary,
   },
   verifiedBadge: {
-    backgroundColor: `${COLORS.success}15`,
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
   },
-  basicBadge: {
-    backgroundColor: `${COLORS.warning}15`,
+  userName: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 4,
   },
-  memberTypeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginLeft: SPACING.xs,
+  userId: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.sm,
   },
-  verificationBanner: {
+  locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: `${COLORS.warning}15`,
-    margin: SPACING.md,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1,
-    borderColor: `${COLORS.warning}30`,
   },
-  verificationInfo: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  verificationTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  verificationText: {
-    fontSize: 12,
+  locationText: {
+    fontSize: 13,
     color: COLORS.textSecondary,
+    marginLeft: 4,
   },
-  section: {
-    padding: SPACING.md,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: SPACING.sm,
-  },
-  sectionSubtitle: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: -SPACING.xs,
-    marginBottom: SPACING.sm,
-  },
-  badgeContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  completionCard: {
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  completionHeader: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: SPACING.sm,
-  },
-  completionPercent: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: COLORS.primary,
-  },
-  completionText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginLeft: SPACING.xs,
-  },
-  completionBar: {
-    height: 8,
-    backgroundColor: COLORS.border,
-    borderRadius: 4,
-  },
-  completionFill: {
-    height: '100%',
-    backgroundColor: COLORS.primary,
-    borderRadius: 4,
-  },
-  statsContainer: {
+  statsRow: {
     flexDirection: 'row',
     backgroundColor: COLORS.surface,
     marginHorizontal: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    padding: SPACING.lg,
+    marginTop: SPACING.md,
+    borderRadius: 16,
+    padding: SPACING.md,
   },
   statItem: {
     flex: 1,
     alignItems: 'center',
   },
-  statNumber: {
+  statValue: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: '700',
     color: COLORS.primary,
   },
   statLabel: {
@@ -505,209 +231,58 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
     backgroundColor: COLORS.divider,
+    marginVertical: 8,
   },
-  horoscopeCard: {
+  menuSection: {
     backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  horoscopeHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-  },
-  zodiacBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: `${COLORS.accent}20`,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  zodiacText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginLeft: SPACING.xs,
-  },
-  luckyInfo: {
-    flexDirection: 'row',
-  },
-  luckyLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  luckyValue: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: COLORS.text,
-  },
-  horoscopeText: {
-    fontSize: 14,
-    color: COLORS.text,
-    lineHeight: 20,
-    marginBottom: SPACING.sm,
-  },
-  auspiciousTime: {
-    fontSize: 12,
-    color: COLORS.success,
-    fontWeight: '500',
-  },
-  fieldRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    marginBottom: SPACING.sm,
-  },
-  fieldIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: `${COLORS.primary}15`,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: SPACING.md,
-  },
-  fieldInfo: {
-    flex: 1,
-  },
-  fieldLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  fieldValue: {
-    fontSize: 14,
-    color: COLORS.text,
-    marginTop: 2,
-  },
-  locationCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  locationText: {
-    fontSize: 14,
-    color: COLORS.text,
-    marginLeft: SPACING.sm,
-    flex: 1,
-  },
-  shareCard: {
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  shareText: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.md,
-  },
-  shareIdBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: `${COLORS.primary}10`,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.sm,
-  },
-  shareIdText: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.primary,
-    textAlign: 'center',
-  },
-  copyButton: {
-    padding: SPACING.xs,
-  },
-  // Settings styles
-  settingsCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: BORDER_RADIUS.lg,
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.md,
+    borderRadius: 16,
     overflow: 'hidden',
   },
-  settingsItem: {
+  menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: SPACING.md,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.divider,
   },
-  settingsIcon: {
+  menuIconContainer: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 10,
+    backgroundColor: `${COLORS.primary}10`,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: SPACING.md,
   },
-  settingsInfo: {
+  menuLabel: {
     flex: 1,
-  },
-  settingsLabel: {
     fontSize: 16,
-    fontWeight: '500',
     color: COLORS.text,
   },
-  settingsDesc: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 2,
+  guidelinesLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: SPACING.lg,
+  },
+  guidelinesText: {
+    fontSize: 14,
+    color: COLORS.info,
+    marginLeft: SPACING.xs,
   },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: SPACING.md,
     marginTop: SPACING.lg,
     paddingVertical: SPACING.md,
-    backgroundColor: `${COLORS.error}10`,
-    borderRadius: BORDER_RADIUS.md,
   },
   logoutText: {
     fontSize: 16,
-    fontWeight: '600',
     color: COLORS.error,
-    marginLeft: SPACING.sm,
-  },
-  bottomPadding: {
-    height: SPACING.xl * 2,
-  },
-  // Modal styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: COLORS.surface,
-    borderTopLeftRadius: BORDER_RADIUS.xl,
-    borderTopRightRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.lg,
-  },
-  modalTitle: {
-    fontSize: 18,
     fontWeight: '600',
-    color: COLORS.text,
-  },
-  modalInput: {
-    backgroundColor: COLORS.background,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: BORDER_RADIUS.md,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm + 4,
-    fontSize: 16,
-    color: COLORS.text,
-    marginBottom: SPACING.lg,
+    marginLeft: SPACING.sm,
   },
 });

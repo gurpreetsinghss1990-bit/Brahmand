@@ -30,8 +30,14 @@ export const verifyOTP = (phone: string, otp: string) =>
 export const register = (data: { phone: string; name: string; photo?: string; language: string }) => 
   api.post('/auth/register', data);
 
+export const registerUser = (data: { phone: string; name: string; photo?: string | null; language: string }) => 
+  api.post('/auth/register', data);
+
 // User APIs
 export const getProfile = () => 
+  api.get('/user/profile');
+
+export const getUserProfile = () => 
   api.get('/user/profile');
 
 export const updateProfile = (data: { name?: string; photo?: string; language?: string }) => 

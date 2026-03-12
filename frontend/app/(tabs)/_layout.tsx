@@ -19,9 +19,9 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: COLORS.surface,
           borderTopColor: COLORS.border,
-          height: 65,
-          paddingBottom: 10,
-          paddingTop: 6,
+          height: 70,
+          paddingBottom: 12,
+          paddingTop: 8,
         },
         tabBarLabelStyle: {
           fontSize: 11,
@@ -34,6 +34,7 @@ export default function TabLayout() {
         headerTitleStyle: {
           color: COLORS.text,
           fontWeight: '600',
+          fontSize: 18,
         },
         headerShadowVisible: false,
       }}
@@ -41,37 +42,37 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Communities',
-          headerTitle: 'Sanatan Lok',
+          title: 'Community',
+          headerTitle: 'Brahmand',
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name="people" color={color} focused={focused} />
           ),
         }}
       />
       <Tabs.Screen
-        name="circles"
+        name="temple"
         options={{
-          title: 'Circles',
+          title: 'Temple',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="ellipse" color={color} focused={focused} />
+            <TabIcon name="home" color={color} focused={focused} />
           ),
         }}
       />
       <Tabs.Screen
         name="messages"
         options={{
-          title: 'Messages',
+          title: 'Chat',
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name="chatbubbles" color={color} focused={focused} />
           ),
         }}
       />
       <Tabs.Screen
-        name="discover"
+        name="vendor"
         options={{
-          title: 'Discover',
+          title: 'Vendor',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="compass" color={color} focused={focused} />
+            <TabIcon name="storefront" color={color} focused={focused} />
           ),
         }}
       />
@@ -84,13 +85,16 @@ export default function TabLayout() {
           ),
         }}
       />
+      {/* Hide these screens from tab bar */}
+      <Tabs.Screen name="circles" options={{ href: null }} />
+      <Tabs.Screen name="discover" options={{ href: null }} />
     </Tabs>
   );
 }
 
 const styles = StyleSheet.create({
   iconContainer: {
-    width: 40,
+    width: 42,
     height: 32,
     borderRadius: 16,
     justifyContent: 'center',

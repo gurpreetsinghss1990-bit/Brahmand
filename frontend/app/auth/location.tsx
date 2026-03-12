@@ -118,7 +118,7 @@ export default function LocationSetupScreen() {
       });
 
       updateUser(response.data.user);
-      router.replace('/(tabs)');
+      router.replace('/auth/entry-animation');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to setup locations. Please try again.');
     } finally {

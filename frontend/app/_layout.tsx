@@ -34,6 +34,7 @@ export default function RootLayout() {
         <Stack.Screen name="auth/otp" />
         <Stack.Screen name="auth/profile" />
         <Stack.Screen name="auth/location" />
+        <Stack.Screen name="auth/entry-animation" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="community/[id]" />
         <Stack.Screen name="chat/[type]/[id]" options={{ presentation: 'card' }} />

@@ -1,0 +1,174 @@
+<analysis>
+<original_problem_statement>
+The user has requested a complete redesign and rebranding of the application. The app name must be changed from Sanatan Lok to Brahmand, with the new tagline The Sanatan Community.
+
+This is a **UI-ONLY** task. All existing backend logic, APIs, and database structures must remain unchanged and fully functional.
+
+**PRODUCT REQUIREMENTS (Brahmand Redesign):**
+
+1.  **New Onboarding Flow:**
+    *   **Welcome Screen:** Full-screen saffron gradient with a background pattern, centered Om logo, app name/tagline, and a mandatory Terms and Conditions checkbox.
+    *   **OTP Verification Screen:** Themed screen for phone number input and OTP verification.
+    *   **Profile Setup Screen:** Themed screen for circular profile photo upload, name, and language selection.
+    *   **Location Setup Screen:** Themed screen for mandatory Home Location and Office Location setup.
+    *   **Entry Animation:** A 2-second Om logo fade-in/fade-out animation before entering the main app.
+
+2.  **New Main App Navigation & Layout:**
+    *   **Bottom Tab Bar:** A 5-tab navigation bar in the order: , , , , . Community is the default tab.
+    *   **Floating Utility Button:** A single, global floating button on the bottom-right.
+        *   Opens a Sanatan Utilities bottom panel on tap, showing Panchang, Gita Slok, Horoscope, and an Emergency SOS feature.
+        *   The button turns red when a nearby SOS is active.
+
+3.  **Redesigned Main Screens:**
+    *   **Community Screen:** Redesigned with top tabs for different help request categories: .
+    *   **Temple Screen:** Redesigned with top tabs: .
+    *   **Vendor Screen:** Redesigned with top tabs: .
+    *   **Chat Screen:** Standard messaging UI for DMs, circles, and groups.
+    *   **Profile Screen:** Redesigned to include links for Edit Profile, Change Location, Settings, KYC, etc.
+
+**Constraint:** Do NOT modify or break any existing working backend features (Auth, Messaging, KYC, Communities, etc.).
+</original_problem_statement>
+
+**User's preferred language**: English
+
+**what currently exists?**
+A full-stack Expo (React Native) and FastAPI application. The backend is feature-rich, with working Firebase phone authentication, a Firestore database, messaging, community management, and a KYC system. The application was previously named Sanatan Lok and was deployed and functional.
+
+The application is currently in a transitional, non-functional state due to an in-progress major UI overhaul. The agent has begun implementing the Brahmand redesign by creating new files for the onboarding flow and main app layout, and updating the theme. The old Sanatan Lok UI components exist but are being replaced.
+
+**Last working item**:
+-   Last item agent was working: The agent was in the initial phase of a complete UI redesign and rebranding of the app from Sanatan Lok to Brahmand. It had created the file skeletons for the new onboarding flow (welcome, profile setup, location setup, entry animation), the new main tab layout, a floating utility button, and had started updating the Community and Profile screens to match the new design.
+-   Status: **IN PROGRESS**
+-   Agent Testing Done: N
+-   Which testing method agent to use? **Frontend testing agent**. Once the new UI is substantially implemented, a full frontend test will be required to ensure all old backend functionalities are correctly wired to the new components. During development, the **screenshot tool** will be useful for visual verification.
+-   User Testing Done: N
+
+**All Pending/In progress Issue list**:
+-   **Issue 1: Complete the Brahmand UI Redesign (P0)**
+    -   **Description:** This is the primary and only active task. The entire user interface needs to be rebuilt according to the user's detailed specifications (Msg 394), including changing the app name to Brahmand.
+    -   **Attempted fixes:** The agent has created the file structure for the new design and updated the theme. Key files like , , , and  have been created but contain mostly boilerplate code.
+    -   **Next debug checklist**: This is a development checklist, not a debug list. The next agent must continue the implementation.
+        1.  **Onboarding:** Fully implement the UI and logic for all 5 onboarding screens: , , , , and . Ensure they correctly call the existing backend auth and user creation APIs.
+        2.  **Main Layout:** Complete the new tab layout in  with the specified tabs and icons (, , , , ).
+        3.  **Floating Button:** Implement the  and the Sanatan Utilities bottom panel it opens.
+        4.  **Redesign Screens:** Build the new UI for the  (),  (new file),  (new file), and  () screens, including their respective top-tab navigators.
+        5.  **Branding:** Ensure the name Brahmand and tagline The Sanatan Community are used consistently throughout the new UI.
+    -   **Why fix this issue and what will be achieved with the fix?** This will fulfill the user's primary request for a complete visual and branding overhaul of the application.
+    -   **Status:** IN PROGRESS
+    -   **Is recurring issue?** N
+    -   **Should Test frontend/backend/both after fix?** Frontend.
+    -   **Blocked on other issue:** None.
+
+**In progress Task List**:
+-   **Task 1: Complete Brahmand UI Redesign (P0)**
+    -   **Where to resume:** Resume by populating the newly created files with the specified UI and logic. The files created in the last session are the starting point: , , , , , , , , and . A good starting point would be to build out the  screen completely, then proceed through the onboarding flow.
+    -   **What will be achieved with this?** A fully functional application with a completely new, modern user interface as per the user's design.
+    -   **Status:** IN PROGRESS
+    -   **Should Test frontend/backend/both after fix?** Frontend.
+    -   **Blocked on something:** None.
+
+**Upcoming and Future Tasks**
+-   There are no other upcoming tasks. All previous requests are either completed or superseded by the current UI redesign task. After the redesign is complete, the user may request to create a VERSION 2 snapshot.
+
+**Completed work in this session**
+-   **Feature Implementation (Pre-Redesign):**
+    -   Implemented Temple Announcement Channels, Role-Based KYC, Sanatan Declaration on signup, Community Guidelines page, Report System.
+    -   Fixed community chat to allow non-KYC users to post.
+    -   Restructured community system into a fixed 5-tier location-based hierarchy.
+    -   Made Office Area a mandatory field during signup.
+-   **Bug Fixes & UI Polish (Pre-Redesign):**
+    -   Fixed Firebase Auth configuration mismatch.
+    -   Resolved profile creation failure due to large photo uploads by implementing server-side image compression.
+    -   Fixed various mobile web UI bugs (icons not loading, square corners, chat input height).
+-   **Deployment:**
+    -   Successfully configured and deployed the Sanatan Lok web app to Firebase Hosting.
+-   **Redesign Kick-off:**
+    -   Started the Brahmand UI redesign by creating the necessary file structure and updating the application's theme.
+
+**Earlier issues found/mentioned but not fixed**
+-   **iOS Chat Screen Layout Bug:** A recurring layout issue on the chat screen for iOS web preview, where the input box misbehaves when the keyboard is open. The agent has attempted fixes, but this is a notoriously difficult issue. The next agent should pay close attention to keyboard behavior when implementing the new chat UI to avoid reintroducing this bug.
+
+**Known issue recurrence from previous fork**
+-   **Issue recurrence in previous fork:** iOS Chat Screen Layout Bug.
+-   **Recurrence count:** High (mentioned multiple times across sessions).
+-   **Status:** NOT STARTED (in the context of the new UI). The previous fix might not be relevant to the new design.
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+-   **Frontend:** Expo (React Native), Expo Router (File-based routing), Zustand
+-   **Backend:** FastAPI, Pydantic
+-   **Database:** Google Firestore
+-   **Authentication:** Firebase Phone Authentication
+-   **Deployment:** Firebase Hosting for the web build.
+
+**key DB schema**
+No changes have been made to the database schema. It supports users, chats, communities, KYC status, temples, etc.
+
+**changes in tech stack**
+None.
+
+**All files of reference**
+*Files created or modified for the ongoing redesign task:*
+-   : New welcome screen.
+-   : New profile creation screen.
+-   : New location setup screen.
+-   : New splash/animation screen.
+-   : The main tab navigator, updated for the new structure.
+-   : The default Community tab, being redesigned.
+-   : The profile tab, being redesigned.
+-   : The new global floating button.
+-   : Updated with new colors for the Brahmand theme.
+
+**Critical Info for New Agent**
+-   **UI REDESIGN IS THE ONLY TASK.** Focus exclusively on implementing the new Brahmand user interface as detailed in the user's request (Msg 394).
+-   **DO NOT TOUCH THE BACKEND.** The backend is stable and has all the necessary APIs. Your job is to connect the new frontend components to the existing backend endpoints.
+-   **RESUME IMPLEMENTATION.** The file structure for the new UI has been laid out. Your task is to continue the work by filling in the UI and logic for each of the new screens and components.
+-   **APP IS CURRENTLY BROKEN.** Due to the in-progress nature of the redesign, the application is not in a runnable or usable state. You must complete the new onboarding and main navigation to make it functional again.
+
+**documents created in this job**
+*New files created for the Brahmand redesign:*
+-   
+-   
+-   
+-   
+-   
+
+**Last 10 User Messages and any pending HUMAN messages**
+-   **10. (Msg 397)** : User confirms the agent's plan for the redesign, approving all phases to be built. (COMPLETED)
+-   **9. (Msg 394)** : The main, detailed request for the Brahmand UI redesign. This is the current source of truth. (IN PROGRESS)
+-   **8. (Msg 391)** : User instruction to pause work. (COMPLETED)
+-   **7. (Msg 384)** : User instruction to continue after a pause. (COMPLETED)
+-   **6. (Msg 375)** : Request to fix the failed deployment. (COMPLETED)
+-   **5. (Msg 350)** : Request to fix UI regressions like square corners and oversized inputs. (COMPLETED)
+-   **4. (Msg 313)** : Request to make Office Area mandatory and add a Change Location feature. (COMPLETED)
+-   **3. (Msg 274)** : Request to create a fixed hierarchy of 5 default communities. (COMPLETED)
+-   **2. (Msg 239)** : Request to fix icons, broken layouts, and chat input on the deployed mobile web version. (COMPLETED)
+-   **1. (Msg 212)** : Initial request to deploy the app. (COMPLETED)
+
+**Project Health Check:**
+-   **Broken:** The entire application UI is non-functional and incomplete due to the in-progress redesign. Key navigation and onboarding flows are broken.
+-   **Mocked:** The data for the Sanatan Utilities panel (Panchang, Gita Slok, Horoscope) will need to be implemented or connected to a real data source.
+
+**3rd Party Integrations**
+-   **Google Firebase:**
+    -   **Firestore:** Primary database.
+    -   **Firebase Authentication:** Used for phone OTP sign-up.
+    -   **Firebase Cloud Messaging (FCM):** Used for push notifications.
+    -   **Firebase Hosting:** Used for deploying the web application.
+-   **Nominatim (OpenStreetMap):** For reverse geocoding.
+-   **Redis:** For backend caching.
+
+**Testing status**
+-   Testing agent used after significant changes: NO (not since the redesign began).
+-   Troubleshoot agent used after agent stuck in loop: NO.
+-   Test files created: None.
+-   Known regressions: The entire UI is currently a regression as it's being rebuilt.
+
+**Credentials to test flow:**
+-   A real phone number capable of receiving SMS is required to test the Firebase Authentication flow once the new UI is connected.
+
+**What agent forgot to execute**
+The agent has not forgotten anything but has only started a very large task. The entire implementation of the Brahmand UI as specified in message 394 is pending.
+</analysis>

@@ -1,14 +1,30 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TextInput, 
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
+  Dimensions,
+  ActivityIndicator
+} from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { Button } from '../../src/components/Button';
 import { verifyOTP, sendOTP } from '../../src/services/api';
-import { verifyFirebaseOTP, sendFirebaseOTP } from '../../src/services/firebase/authService';
 import { useAuthStore } from '../../src/store/authStore';
-import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
-import api from '../../src/services/api';
+import { COLORS, SPACING } from '../../src/constants/theme';
+
+const { width } = Dimensions.get('window');
+
+const MandalaPattern = () => (
+  <View style={styles.mandalaContainer}>
+    <View style={styles.mandalaCircle} />
+    <View style={[styles.mandalaCircle, styles.mandalaCircle2]} />
+  </View>
+);
 
 export default function OTPScreen() {
   const router = useRouter();
@@ -23,13 +39,13 @@ export default function OTPScreen() {
   const inputRefs = useRef<TextInput[]>([]);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setResendTimer((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+    if (resendTimer > 0) {
+      const timer = setTimeout(() => setResendTimer(resendTimer - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resendTimer]);
 
-  const handleOtpChange = (index: number, value: string) => {
+  const handleOtpChange = (value: string, index: number) => {
     const newOtp = [...otp];
     newOtp[index] = value;
     setOtp(newOtp);
@@ -39,69 +55,37 @@ export default function OTPScreen() {
       inputRefs.current[index + 1]?.focus();
     }
 
-    if (newOtp.every((digit) => digit !== '')) {
-      handleVerify(newOtp.join(''));
+    if (newOtp.every(digit => digit !== '')) {
+      verifyCode(newOtp.join(''));
     }
   };
 
-  const handleKeyPress = (index: number, key: string) => {
-    if (key === 'Backspace' && !otp[index] && index > 0) {
+  const handleKeyPress = (e: any, index: number) => {
+    if (e.nativeEvent.key === 'Backspace' && !otp[index] && index > 0) {
       inputRefs.current[index - 1]?.focus();
     }
   };
 
-  const handleVerify = async (otpCode?: string) => {
-    const code = otpCode || otp.join('');
-    if (code.length !== 6) {
-      setError('Please enter complete OTP');
-      return;
-    }
-
+  const verifyCode = async (code: string) => {
     setLoading(true);
     setError('');
 
     try {
-      // Verify OTP with Firebase and get ID token
-      const idToken = await verifyFirebaseOTP(code);
-      
-      // Send token to backend for verification and user creation
-      const response = await api.post('/auth/verify-firebase-token', { id_token: idToken });
+      const response = await verifyOTP(phone || '', code);
       const data = response.data;
 
       if (data.is_new_user) {
-        router.push({ pathname: '/auth/profile', params: { phone: data.phone, firebase_uid: data.firebase_uid } });
+        router.push({ pathname: '/auth/profile', params: { phone } });
       } else {
         await login(data.user, data.token);
         if (data.user.home_location || data.user.location) {
           router.replace('/(tabs)');
         } else {
-          router.replace('/auth/address-entry');
+          router.replace('/auth/location');
         }
       }
     } catch (err: any) {
-      console.error('[OTP] Verification error:', err);
-      
-      // Fallback to legacy OTP verification for testing
-      try {
-        const response = await verifyOTP(phone || '', code);
-        const data = response.data;
-
-        if (data.is_new_user) {
-          // Route to declaration screen first for new users
-          router.push({ pathname: '/auth/declaration', params: { phone, firebase_uid: data.firebase_uid } });
-        } else {
-          await login(data.user, data.token);
-          if (data.user.home_location || data.user.location) {
-            router.replace('/(tabs)');
-          } else {
-            router.replace('/auth/address-entry');
-          }
-        }
-        return;
-      } catch (legacyErr: any) {
-        setError(err.message || legacyErr.response?.data?.detail || 'Invalid OTP. Please try again.');
-      }
-      
+      setError(err.response?.data?.detail || 'Invalid OTP. Please try again.');
       setOtp(['', '', '', '', '', '']);
       inputRefs.current[0]?.focus();
     } finally {
@@ -111,48 +95,46 @@ export default function OTPScreen() {
 
   const handleResend = async () => {
     if (resendTimer > 0) return;
-    
     try {
-      await sendFirebaseOTP(phone || '');
+      await sendOTP(phone || '');
       setResendTimer(30);
-      setOtp(['', '', '', '', '', '']);
-      inputRefs.current[0]?.focus();
-    } catch (err: any) {
-      setError(err.message || 'Failed to resend OTP');
+      setError('');
+    } catch (err) {
+      setError('Failed to resend OTP');
     }
   };
 
-  // Format phone for display
-  const displayPhone = phone?.replace('+91', '') || '';
-
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
+    <LinearGradient
+      colors={['#FF6600', '#FF9933']}
+      style={styles.container}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+    >
+      <MandalaPattern />
+      
+      <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+          <Ionicons name="arrow-back" size={28} color="#FFFFFF" />
         </TouchableOpacity>
 
         <View style={styles.content}>
-          <View style={styles.header}>
-            <Ionicons name="keypad" size={48} color={COLORS.primary} />
-            <Text style={styles.title}>Verify OTP</Text>
-            <Text style={styles.subtitle}>
-              Enter the 6-digit code sent to {phone}
-            </Text>
-          </View>
+          <Text style={styles.title}>Verify OTP</Text>
+          <Text style={styles.subtitle}>Enter the code sent to {phone}</Text>
 
+          {/* OTP Inputs */}
           <View style={styles.otpContainer}>
             {otp.map((digit, index) => (
               <TextInput
                 key={index}
-                ref={(ref) => (inputRefs.current[index] = ref!)}
-                style={[styles.otpInput, error && styles.otpInputError]}
+                ref={(ref) => inputRefs.current[index] = ref!}
+                style={[styles.otpInput, digit && styles.otpInputFilled]}
                 value={digit}
-                onChangeText={(value) => handleOtpChange(index, value.replace(/[^0-9]/g, '').slice(0, 1))}
-                onKeyPress={({ nativeEvent }) => handleKeyPress(index, nativeEvent.key)}
+                onChangeText={(value) => handleOtpChange(value.replace(/[^0-9]/g, ''), index)}
+                onKeyPress={(e) => handleKeyPress(e, index)}
                 keyboardType="number-pad"
                 maxLength={1}
                 selectTextOnFocus
@@ -161,95 +143,110 @@ export default function OTPScreen() {
           </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
+          
+          {loading && (
+            <ActivityIndicator color="#FFFFFF" style={{ marginTop: SPACING.md }} />
+          )}
 
-          <Button
-            title={loading ? "Verifying..." : "Verify"}
-            onPress={() => handleVerify()}
-            loading={loading}
-            disabled={otp.some((digit) => digit === '') || loading}
-          />
-
-          <TouchableOpacity
-            style={styles.resendButton}
+          {/* Resend */}
+          <TouchableOpacity 
+            style={styles.resendButton} 
             onPress={handleResend}
             disabled={resendTimer > 0}
           >
-            <Text style={[styles.resendText, resendTimer > 0 && styles.resendDisabled]}>
-              {resendTimer > 0 ? `Resend OTP in ${resendTimer}s` : 'Resend OTP'}
+            <Text style={[styles.resendText, resendTimer > 0 && styles.resendTextDisabled]}>
+              {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend OTP'}
             </Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+  },
+  mandalaContainer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    opacity: 0.08,
+  },
+  mandalaCircle: {
+    position: 'absolute',
+    width: width * 1.2,
+    height: width * 1.2,
+    borderRadius: width * 0.6,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  mandalaCircle2: {
+    width: width * 0.8,
+    height: width * 0.8,
+    borderRadius: width * 0.4,
   },
   keyboardView: {
     flex: 1,
   },
   backButton: {
-    padding: SPACING.md,
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    zIndex: 10,
+    padding: 8,
   },
   content: {
     flex: 1,
+    justifyContent: 'center',
     paddingHorizontal: SPACING.lg,
   },
-  header: {
-    alignItems: 'center',
-    marginBottom: SPACING.xl * 2,
-  },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginTop: SPACING.lg,
-    marginBottom: SPACING.sm,
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: SPACING.xs,
   },
   subtitle: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: SPACING.xl,
   },
   otpContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: SPACING.lg,
-  },
-  otpInput: {
-    width: 48,
-    height: 56,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: BORDER_RADIUS.md,
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    color: COLORS.text,
-  },
-  otpInputError: {
-    borderColor: COLORS.error,
-  },
-  error: {
-    color: COLORS.error,
-    textAlign: 'center',
     marginBottom: SPACING.md,
   },
+  otpInput: {
+    width: 50,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  otpInputFilled: {
+    backgroundColor: 'rgba(255,255,255,0.35)',
+  },
+  error: {
+    color: '#FFCCCC',
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: SPACING.sm,
+  },
   resendButton: {
-    marginTop: SPACING.lg,
     alignItems: 'center',
+    marginTop: SPACING.xl,
   },
   resendText: {
-    fontSize: 14,
-    color: COLORS.primary,
+    fontSize: 16,
+    color: '#FFFFFF',
     fontWeight: '600',
   },
-  resendDisabled: {
-    color: COLORS.textLight,
+  resendTextDisabled: {
+    color: 'rgba(255,255,255,0.5)',
   },
 });

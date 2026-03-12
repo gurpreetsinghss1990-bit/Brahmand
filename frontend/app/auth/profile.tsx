@@ -1,30 +1,52 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, KeyboardAvoidingView, Platform } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TextInput, 
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
+  Dimensions,
+  ActivityIndicator,
+  Image,
+  Modal,
+  FlatList,
+  ScrollView
+} from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { Input } from '../../src/components/Input';
-import { Button } from '../../src/components/Button';
-import { register } from '../../src/services/api';
+import { registerUser } from '../../src/services/api';
 import { useAuthStore } from '../../src/store/authStore';
-import { COLORS, SPACING, BORDER_RADIUS, LANGUAGES } from '../../src/constants/theme';
+import { COLORS, SPACING, LANGUAGES } from '../../src/constants/theme';
 
-export default function ProfileSetupScreen() {
+const { width } = Dimensions.get('window');
+
+const MandalaPattern = () => (
+  <View style={styles.mandalaContainer}>
+    <View style={styles.mandalaCircle} />
+    <View style={[styles.mandalaCircle, styles.mandalaCircle2]} />
+  </View>
+);
+
+export default function ProfileScreen() {
   const router = useRouter();
   const { phone } = useLocalSearchParams<{ phone: string }>();
   const { login } = useAuthStore();
-
+  
   const [name, setName] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [language, setLanguage] = useState('English');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showLanguagePicker, setShowLanguagePicker] = useState(false);
 
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      alert('Sorry, we need camera roll permissions to upload a photo.');
+      alert('Camera roll permission needed');
       return;
     }
 
@@ -32,22 +54,16 @@ export default function ProfileSetupScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.3, // Lower quality to reduce file size
+      quality: 0.3,
       base64: true,
     });
 
     if (!result.canceled && result.assets[0].base64) {
-      const base64Data = result.assets[0].base64;
-      // Check if photo is too large (max ~500KB for safety with Firestore)
-      if (base64Data.length > 500000) {
-        alert('Photo is too large. Please choose a smaller image or take a new photo.');
-        return;
-      }
-      setPhoto(`data:image/jpeg;base64,${base64Data}`);
+      setPhoto(`data:image/jpeg;base64,${result.assets[0].base64}`);
     }
   };
 
-  const handleRegister = async () => {
+  const handleContinue = async () => {
     if (!name.trim()) {
       setError('Please enter your name');
       return;
@@ -57,194 +73,361 @@ export default function ProfileSetupScreen() {
     setError('');
 
     try {
-      const response = await register({
+      const response = await registerUser({
         phone: phone || '',
         name: name.trim(),
-        photo: photo || undefined,
+        photo,
         language,
       });
 
       await login(response.data.user, response.data.token);
-      // Navigate to new address entry flow
-      router.replace('/auth/address-entry');
+      router.replace('/auth/location');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Registration failed. Please try again.');
+      setError(err.response?.data?.detail || 'Registration failed');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
+    <LinearGradient
+      colors={['#FF6600', '#FF9933']}
+      style={styles.container}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+    >
+      <MandalaPattern />
+      
+      <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+          <Ionicons name="arrow-back" size={28} color="#FFFFFF" />
         </TouchableOpacity>
 
-        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.content}>
-            <View style={styles.header}>
-              <Text style={styles.title}>Create Your Profile</Text>
-              <Text style={styles.subtitle}>Tell us about yourself</Text>
-            </View>
+            <Text style={styles.title}>Create Profile</Text>
+            <Text style={styles.subtitle}>Set up your Brahmand profile</Text>
 
-            {/* Photo Picker */}
-            <TouchableOpacity style={styles.photoPicker} onPress={pickImage}>
+            {/* Profile Photo */}
+            <TouchableOpacity style={styles.photoContainer} onPress={pickImage}>
               {photo ? (
-                <Image source={{ uri: photo }} style={styles.photoImage} />
+                <Image source={{ uri: photo }} style={styles.photo} />
               ) : (
                 <View style={styles.photoPlaceholder}>
-                  <Ionicons name="camera" size={32} color={COLORS.primary} />
-                  <Text style={styles.photoText}>Add Photo</Text>
+                  <Ionicons name="camera" size={32} color="rgba(255,255,255,0.6)" />
                 </View>
               )}
+              <View style={styles.photoEditBadge}>
+                <Ionicons name="pencil" size={14} color="#FFFFFF" />
+              </View>
             </TouchableOpacity>
 
             {/* Name Input */}
-            <Input
-              label="Full Name"
-              placeholder="Enter your full name"
+            <TextInput
+              style={styles.nameInput}
+              placeholder="Your Name"
+              placeholderTextColor="rgba(255,255,255,0.5)"
               value={name}
               onChangeText={(text) => {
                 setName(text);
                 setError('');
               }}
-              error={error}
+              autoCapitalize="words"
             />
 
-            {/* Language Selection */}
-            <Text style={styles.label}>Select Language</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.languageScroll}
+            {/* Language Selector */}
+            <TouchableOpacity 
+              style={styles.languageSelector}
+              onPress={() => setShowLanguagePicker(true)}
             >
-              {LANGUAGES.map((lang) => (
-                <TouchableOpacity
-                  key={lang}
-                  style={[
-                    styles.languageChip,
-                    language === lang && styles.languageChipSelected,
-                  ]}
-                  onPress={() => setLanguage(lang)}
-                >
-                  <Text
-                    style={[
-                      styles.languageText,
-                      language === lang && styles.languageTextSelected,
-                    ]}
-                  >
-                    {lang}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+              <Text style={styles.languageLabel}>Language</Text>
+              <View style={styles.languageValue}>
+                <Text style={styles.languageText}>{language}</Text>
+                <Ionicons name="chevron-down" size={20} color="rgba(255,255,255,0.8)" />
+              </View>
+            </TouchableOpacity>
 
-            <Button
-              title="Continue"
-              onPress={handleRegister}
-              loading={loading}
-              disabled={!name.trim()}
-              style={styles.button}
-            />
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+
+            {/* Continue Button */}
+            <TouchableOpacity
+              style={[styles.continueButton, !name.trim() && styles.continueButtonDisabled]}
+              onPress={handleContinue}
+              disabled={!name.trim() || loading}
+            >
+              {loading ? (
+                <ActivityIndicator color={COLORS.primary} />
+              ) : (
+                <Text style={styles.continueButtonText}>Continue</Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Privacy Note */}
+            <View style={styles.privacyNote}>
+              <Ionicons name="lock-closed" size={14} color="rgba(255,255,255,0.7)" />
+              <Text style={styles.privacyText}>Your information stays private</Text>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+
+      {/* Language Picker Modal */}
+      <Modal
+        visible={showLanguagePicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowLanguagePicker(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowLanguagePicker(false)}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Select Language</Text>
+            <FlatList
+              data={LANGUAGES}
+              keyExtractor={(item) => item}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.languageOption,
+                    language === item && styles.languageOptionSelected
+                  ]}
+                  onPress={() => {
+                    setLanguage(item);
+                    setShowLanguagePicker(false);
+                  }}
+                >
+                  <Text style={[
+                    styles.languageOptionText,
+                    language === item && styles.languageOptionTextSelected
+                  ]}>
+                    {item}
+                  </Text>
+                  {language === item && (
+                    <Ionicons name="checkmark" size={22} color={COLORS.primary} />
+                  )}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+  },
+  mandalaContainer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    opacity: 0.08,
+  },
+  mandalaCircle: {
+    position: 'absolute',
+    width: width * 1.2,
+    height: width * 1.2,
+    borderRadius: width * 0.6,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  mandalaCircle2: {
+    width: width * 0.8,
+    height: width * 0.8,
+    borderRadius: width * 0.4,
   },
   keyboardView: {
     flex: 1,
   },
   backButton: {
-    padding: SPACING.md,
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    zIndex: 10,
+    padding: 8,
   },
-  scrollView: {
-    flex: 1,
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   content: {
     paddingHorizontal: SPACING.lg,
-    paddingBottom: SPACING.xl * 2,
-  },
-  header: {
-    marginBottom: SPACING.xl,
+    paddingTop: 100,
+    paddingBottom: SPACING.xl,
+    alignItems: 'center',
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: COLORS.text,
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#FFFFFF',
     marginBottom: SPACING.xs,
   },
   subtitle: {
     fontSize: 16,
-    color: COLORS.textSecondary,
-  },
-  photoPicker: {
-    alignSelf: 'center',
+    color: 'rgba(255,255,255,0.8)',
     marginBottom: SPACING.xl,
   },
-  photoImage: {
+  photoContainer: {
+    marginBottom: SPACING.xl,
+  },
+  photo: {
     width: 120,
     height: 120,
     borderRadius: 60,
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.5)',
   },
   photoPlaceholder: {
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: `${COLORS.primary}15`,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: COLORS.primary,
+    borderColor: 'rgba(255,255,255,0.3)',
     borderStyle: 'dashed',
   },
-  photoText: {
-    marginTop: SPACING.xs,
-    fontSize: 12,
-    color: COLORS.primary,
-    fontWeight: '500',
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: SPACING.sm,
-  },
-  languageScroll: {
-    marginBottom: SPACING.xl,
-  },
-  languageChip: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    backgroundColor: COLORS.surface,
-    borderRadius: BORDER_RADIUS.full,
-    marginRight: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  languageChipSelected: {
+  photoEditBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  nameInput: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md + 2,
+    borderRadius: 12,
+    fontSize: 18,
+    color: '#FFFFFF',
+    textAlign: 'center',
+    marginBottom: SPACING.md,
+  },
+  languageSelector: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.md,
+  },
+  languageLabel: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.6)',
+  },
+  languageValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   languageText: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontWeight: '500',
+    marginRight: SPACING.xs,
+  },
+  error: {
+    color: '#FFCCCC',
     fontSize: 14,
+    marginBottom: SPACING.md,
+  },
+  continueButton: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: SPACING.md + 2,
+    borderRadius: 30,
+    alignItems: 'center',
+    marginTop: SPACING.md,
+  },
+  continueButtonDisabled: {
+    backgroundColor: 'rgba(255,255,255,0.4)',
+  },
+  continueButtonText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  privacyNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: SPACING.lg,
+  },
+  privacyText: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.7)',
+    marginLeft: SPACING.xs,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: SPACING.lg,
+    maxHeight: '60%',
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.divider,
+    alignSelf: 'center',
+    marginBottom: SPACING.md,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: SPACING.md,
+    textAlign: 'center',
+  },
+  languageOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  languageOptionSelected: {
+    backgroundColor: `${COLORS.primary}10`,
+    marginHorizontal: -SPACING.lg,
+    paddingHorizontal: SPACING.lg,
+  },
+  languageOptionText: {
+    fontSize: 16,
     color: COLORS.text,
   },
-  languageTextSelected: {
-    color: COLORS.textWhite,
+  languageOptionTextSelected: {
     fontWeight: '600',
-  },
-  button: {
-    marginTop: SPACING.lg,
+    color: COLORS.primary,
   },
 });

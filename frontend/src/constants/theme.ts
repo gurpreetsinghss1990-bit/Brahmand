@@ -1,9 +1,16 @@
 export const COLORS = {
-  primary: '#FF6B00',
-  primaryLight: '#FF8C33',
-  primaryDark: '#CC5500',
+  // Brahmand Brand Colors
+  primary: '#FF6600',
+  primaryLight: '#FF9933',
+  primaryDark: '#CC5200',
   secondary: '#8B4513',
   accent: '#FFD700',
+  saffron: '#FF6600',
+  saffronLight: '#FF9933',
+  
+  // Gradients (for reference)
+  gradientStart: '#FF6600',
+  gradientEnd: '#FF9933',
   
   background: '#FFF8F0',
   surface: '#FFFFFF',
@@ -21,6 +28,10 @@ export const COLORS = {
   error: '#E53935',
   warning: '#FF9800',
   info: '#2196F3',
+  
+  // SOS Colors
+  sos: '#E53935',
+  sosActive: '#D32F2F',
   
   badge: {
     verified: '#4CAF50',
