@@ -246,4 +246,120 @@ export const createTemplePost = (templeId: string, data: {
 export const markMessagesRead = (chatId: string) => 
   api.post(`/dm/${chatId}/read`);
 
+// =================== HELP REQUEST APIS ===================
+
+export const createHelpRequest = (data: {
+  type: 'blood' | 'medical' | 'financial' | 'food' | 'other';
+  title: string;
+  description: string;
+  community_level?: 'area' | 'city' | 'state' | 'country';
+  location?: string;
+  contact_number: string;
+  urgency?: 'normal' | 'urgent' | 'critical';
+  blood_group?: string;
+  hospital_name?: string;
+  amount?: number;
+}) => api.post('/help-requests', data);
+
+export const getHelpRequests = (params?: {
+  type?: string;
+  community_level?: string;
+  status?: string;
+  limit?: number;
+}) => api.get('/help-requests', { params });
+
+export const getMyHelpRequests = () => 
+  api.get('/help-requests/my');
+
+export const getActiveHelpRequest = () => 
+  api.get('/help-requests/active');
+
+export const fulfillHelpRequest = (requestId: string) => 
+  api.post(`/help-requests/${requestId}/fulfill`);
+
+export const verifyHelpRequest = (requestId: string) => 
+  api.post(`/help-requests/${requestId}/verify`);
+
+export const deleteHelpRequest = (requestId: string) => 
+  api.delete(`/help-requests/${requestId}`);
+
+// =================== VENDOR APIS ===================
+
+export const createVendor = (data: {
+  business_name: string;
+  owner_name: string;
+  years_in_business: number;
+  categories: string[];
+  full_address: string;
+  location_link?: string;
+  phone_number: string;
+  latitude?: number;
+  longitude?: number;
+}) => api.post('/vendors', data);
+
+export const getVendors = (params?: {
+  category?: string;
+  search?: string;
+  lat?: number;
+  lng?: number;
+  limit?: number;
+}) => api.get('/vendors', { params });
+
+export const getMyVendor = () => 
+  api.get('/vendors/my');
+
+export const getVendorCategories = () => 
+  api.get('/vendors/categories');
+
+export const getVendor = (vendorId: string) => 
+  api.get(`/vendors/${vendorId}`);
+
+export const updateVendor = (vendorId: string, data: {
+  business_name?: string;
+  owner_name?: string;
+  years_in_business?: number;
+  categories?: string[];
+  full_address?: string;
+  location_link?: string;
+  phone_number?: string;
+  latitude?: number;
+  longitude?: number;
+  photos?: string[];
+}) => api.put(`/vendors/${vendorId}`, data);
+
+export const addVendorPhoto = (vendorId: string, photo: string) => 
+  api.post(`/vendors/${vendorId}/photos`, photo, {
+    headers: { 'Content-Type': 'application/json' }
+  });
+
+export const deleteVendor = (vendorId: string) => 
+  api.delete(`/vendors/${vendorId}`);
+
+// =================== CULTURAL COMMUNITY APIS ===================
+
+export const getCulturalCommunities = (search?: string) => 
+  api.get('/cultural-communities', { params: { search } });
+
+export const getUserCulturalCommunity = () => 
+  api.get('/user/cultural-community');
+
+export const updateUserCulturalCommunity = (cultural_community: string) => 
+  api.put('/user/cultural-community', { cultural_community });
+
+// =================== CIRCLE MESSAGE APIS ===================
+
+export const sendCircleMessage = (circleId: string, content: string) => 
+  api.post(`/messages/circle/${circleId}`, { content, message_type: 'text' });
+
+export const getCircleMessages = (circleId: string, limit: number = 50) => 
+  api.get(`/messages/circle/${circleId}`, { params: { limit } });
+
+// =================== UTILITY APIS ===================
+
+export const getWisdom = () => 
+  api.get('/wisdom/today');
+
+export const getPanchang = () => 
+  api.get('/panchang/today');
+
 export default api;

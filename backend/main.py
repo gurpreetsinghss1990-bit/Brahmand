@@ -9,8 +9,9 @@ import sys
 from pathlib import Path
 from datetime import datetime
 from contextlib import asynccontextmanager
+from typing import Optional, List
 
-from fastapi import FastAPI, APIRouter, Request, HTTPException, Depends
+from fastapi import FastAPI, APIRouter, Request, HTTPException, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import socketio
@@ -33,7 +34,9 @@ from services.push_notification_service import push_service
 from models.schemas import (
     OTPRequest, OTPVerify, UserCreate, UserUpdate, ProfileUpdate,
     LocationSetup, DualLocationSetup, MessageCreate, DirectMessageCreate,
-    CircleCreate, CircleJoin, CircleUpdate, CircleInvite, CirclePrivacy
+    CircleCreate, CircleJoin, CircleUpdate, CircleInvite, CirclePrivacy,
+    HelpRequestCreate, HelpStatus, HelpUrgency, CommunityLevel,
+    VendorCreate, VendorUpdate, CulturalCommunityUpdate
 )
 from middleware.security import verify_token, create_jwt_token
 from middleware.rate_limiter import auth_rate_limit, messaging_rate_limit
@@ -2238,6 +2241,464 @@ async def get_panchang():
         "vrat": vrat,
         "nakshatra": "Rohini",
         "yoga": "Siddhi"
+    }
+
+
+# =================== HELP REQUESTS ===================
+
+@api_router.post("/help-requests")
+async def create_help_request(data: HelpRequestCreate, token_data: dict = Depends(verify_token)):
+    """Create a new help request"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
+    # Check if user already has an active request
+    existing = await db.find_one('help_requests', [
+        ('creator_id', '==', user_id),
+        ('status', '==', 'active')
+    ])
+    if existing:
+        raise HTTPException(status_code=400, detail="You already have an active help request. Mark it as fulfilled before creating a new one.")
+    
+    # Get user's location based on community level
+    location = data.location
+    if not location:
+        if data.community_level.value == 'area':
+            location = user.get('location_area', {}).get('area', 'Unknown')
+        elif data.community_level.value == 'city':
+            location = user.get('location_area', {}).get('city', 'Unknown')
+        elif data.community_level.value == 'state':
+            location = user.get('location_area', {}).get('state', 'Unknown')
+        else:
+            location = 'India'
+    
+    request_data = {
+        "creator_id": user_id,
+        "creator_name": user.get('name'),
+        "creator_photo": user.get('photo'),
+        "creator_sl_id": user.get('sl_id'),
+        "type": data.type.value,
+        "title": data.title,
+        "description": data.description,
+        "community_level": data.community_level.value,
+        "location": location,
+        "contact_number": data.contact_number,
+        "urgency": data.urgency.value,
+        "status": "active",
+        "blood_group": data.blood_group,
+        "hospital_name": data.hospital_name,
+        "amount": data.amount,
+        "verifications": 0,
+        "verified_by": []
+    }
+    
+    request_id = await db.create_document('help_requests', request_data)
+    request_data['id'] = request_id
+    
+    logger.info(f"Help request created by {user_id}: {data.type.value} - {data.title}")
+    return request_data
+
+
+@api_router.get("/help-requests")
+async def get_help_requests(
+    type: Optional[str] = None,
+    community_level: Optional[str] = None,
+    status: str = "active",
+    limit: int = 50,
+    token_data: dict = Depends(verify_token)
+):
+    """Get help requests visible to the user"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
+    filters = [('status', '==', status)]
+    
+    if type:
+        filters.append(('type', '==', type))
+    
+    if community_level:
+        filters.append(('community_level', '==', community_level))
+    
+    requests = await db.query_documents('help_requests', filters=filters, limit=limit, order_by='created_at', order_direction='DESCENDING')
+    return requests
+
+
+@api_router.get("/help-requests/my")
+async def get_my_help_requests(token_data: dict = Depends(verify_token)):
+    """Get current user's help requests"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    requests = await db.query_documents('help_requests', filters=[
+        ('creator_id', '==', user_id)
+    ], order_by='created_at', order_direction='DESCENDING')
+    
+    return requests
+
+
+@api_router.get("/help-requests/active")
+async def get_active_help_request(token_data: dict = Depends(verify_token)):
+    """Get current user's active help request"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    request = await db.find_one('help_requests', [
+        ('creator_id', '==', user_id),
+        ('status', '==', 'active')
+    ])
+    
+    return request
+
+
+@api_router.post("/help-requests/{request_id}/fulfill")
+async def fulfill_help_request(request_id: str, token_data: dict = Depends(verify_token)):
+    """Mark a help request as fulfilled (creator only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    request = await db.get_document('help_requests', request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Help request not found")
+    
+    if request.get('creator_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only the creator can mark as fulfilled")
+    
+    await db.update_document('help_requests', request_id, {'status': 'fulfilled'})
+    logger.info(f"Help request {request_id} marked as fulfilled by {user_id}")
+    
+    return {"message": "Help request marked as fulfilled"}
+
+
+@api_router.post("/help-requests/{request_id}/verify")
+async def verify_help_request(request_id: str, token_data: dict = Depends(verify_token)):
+    """Verify a help request (community member)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    request = await db.get_document('help_requests', request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Help request not found")
+    
+    if request.get('creator_id') == user_id:
+        raise HTTPException(status_code=400, detail="Cannot verify your own request")
+    
+    if user_id in request.get('verified_by', []):
+        raise HTTPException(status_code=400, detail="You have already verified this request")
+    
+    await db.array_union_update('help_requests', request_id, 'verified_by', [user_id])
+    await db.update_document('help_requests', request_id, {
+        'verifications': (request.get('verifications', 0) + 1)
+    })
+    
+    return {"message": "Help request verified"}
+
+
+@api_router.delete("/help-requests/{request_id}")
+async def delete_help_request(request_id: str, token_data: dict = Depends(verify_token)):
+    """Delete a help request (creator only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    request = await db.get_document('help_requests', request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Help request not found")
+    
+    if request.get('creator_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only the creator can delete the request")
+    
+    await db.delete_document('help_requests', request_id)
+    logger.info(f"Help request {request_id} deleted by {user_id}")
+    
+    return {"message": "Help request deleted"}
+
+
+# =================== VENDORS ===================
+
+@api_router.post("/vendors")
+async def create_vendor(data: VendorCreate, token_data: dict = Depends(verify_token)):
+    """Register a new vendor"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
+    # Check if user already has a vendor
+    existing = await db.find_one('vendors', [('owner_id', '==', user_id)])
+    if existing:
+        raise HTTPException(status_code=400, detail="You already have a registered business")
+    
+    # Add new categories to global category list
+    for category in data.categories:
+        existing_cat = await db.find_one('vendor_categories', [('name', '==', category)])
+        if not existing_cat:
+            await db.create_document('vendor_categories', {'name': category, 'count': 1})
+        else:
+            await db.update_document('vendor_categories', existing_cat['id'], {
+                'count': existing_cat.get('count', 0) + 1
+            })
+    
+    vendor_data = {
+        "owner_id": user_id,
+        "owner_name": data.owner_name,
+        "business_name": data.business_name,
+        "years_in_business": data.years_in_business,
+        "categories": data.categories,
+        "full_address": data.full_address,
+        "location_link": data.location_link,
+        "phone_number": data.phone_number,
+        "latitude": data.latitude,
+        "longitude": data.longitude,
+        "photos": []
+    }
+    
+    vendor_id = await db.create_document('vendors', vendor_data)
+    vendor_data['id'] = vendor_id
+    
+    # Update user to mark as vendor
+    await db.update_document('users', user_id, {'is_vendor': True, 'vendor_id': vendor_id})
+    
+    logger.info(f"Vendor created by {user_id}: {data.business_name}")
+    return vendor_data
+
+
+@api_router.get("/vendors")
+async def get_vendors(
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    limit: int = 50,
+    token_data: dict = Depends(verify_token)
+):
+    """Get vendors with optional filters"""
+    db = await get_db()
+    
+    filters = []
+    if category:
+        filters.append(('categories', 'array_contains', category))
+    
+    vendors = await db.query_documents('vendors', filters=filters, limit=limit)
+    
+    # Filter by search term if provided
+    if search:
+        search_lower = search.lower()
+        vendors = [v for v in vendors if 
+                   search_lower in v.get('business_name', '').lower() or
+                   any(search_lower in cat.lower() for cat in v.get('categories', []))]
+    
+    # Calculate distance if coordinates provided
+    if lat and lng:
+        import math
+        for vendor in vendors:
+            if vendor.get('latitude') and vendor.get('longitude'):
+                # Haversine formula
+                R = 6371  # Earth radius in km
+                lat1, lon1 = math.radians(lat), math.radians(lng)
+                lat2, lon2 = math.radians(vendor['latitude']), math.radians(vendor['longitude'])
+                dlat, dlon = lat2 - lat1, lon2 - lon1
+                a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+                vendor['distance'] = R * 2 * math.asin(math.sqrt(a))
+            else:
+                vendor['distance'] = None
+        
+        # Sort by distance
+        vendors.sort(key=lambda v: v.get('distance') or 999999)
+    
+    return vendors
+
+
+@api_router.get("/vendors/my")
+async def get_my_vendor(token_data: dict = Depends(verify_token)):
+    """Get current user's vendor profile"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    vendor = await db.find_one('vendors', [('owner_id', '==', user_id)])
+    return vendor
+
+
+@api_router.get("/vendors/categories")
+async def get_vendor_categories():
+    """Get all available vendor categories"""
+    db = await get_db()
+    categories = await db.query_documents('vendor_categories', order_by='count', order_direction='DESCENDING')
+    return [cat.get('name') for cat in categories]
+
+
+@api_router.get("/vendors/{vendor_id}")
+async def get_vendor(vendor_id: str, token_data: dict = Depends(verify_token)):
+    """Get vendor details"""
+    db = await get_db()
+    vendor = await db.get_document('vendors', vendor_id)
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return vendor
+
+
+@api_router.put("/vendors/{vendor_id}")
+async def update_vendor(vendor_id: str, data: VendorUpdate, token_data: dict = Depends(verify_token)):
+    """Update vendor details (owner only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    vendor = await db.get_document('vendors', vendor_id)
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    
+    if vendor.get('owner_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only the owner can update the vendor")
+    
+    update_data = data.dict(exclude_unset=True, exclude_none=True)
+    
+    # Handle new categories
+    if 'categories' in update_data:
+        for category in update_data['categories']:
+            existing_cat = await db.find_one('vendor_categories', [('name', '==', category)])
+            if not existing_cat:
+                await db.create_document('vendor_categories', {'name': category, 'count': 1})
+    
+    if update_data:
+        await db.update_document('vendors', vendor_id, update_data)
+    
+    logger.info(f"Vendor {vendor_id} updated by {user_id}")
+    return {"message": "Vendor updated successfully"}
+
+
+@api_router.post("/vendors/{vendor_id}/photos")
+async def add_vendor_photo(vendor_id: str, photo: str = Body(...), token_data: dict = Depends(verify_token)):
+    """Add a photo to vendor gallery"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    vendor = await db.get_document('vendors', vendor_id)
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    
+    if vendor.get('owner_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only the owner can add photos")
+    
+    await db.array_union_update('vendors', vendor_id, 'photos', [photo])
+    return {"message": "Photo added successfully"}
+
+
+@api_router.delete("/vendors/{vendor_id}")
+async def delete_vendor(vendor_id: str, token_data: dict = Depends(verify_token)):
+    """Delete a vendor (owner only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    vendor = await db.get_document('vendors', vendor_id)
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    
+    if vendor.get('owner_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only the owner can delete the vendor")
+    
+    await db.delete_document('vendors', vendor_id)
+    await db.update_document('users', user_id, {'is_vendor': False, 'vendor_id': None})
+    
+    logger.info(f"Vendor {vendor_id} deleted by {user_id}")
+    return {"message": "Vendor deleted successfully"}
+
+
+# =================== CULTURAL COMMUNITY ===================
+
+# Comprehensive list of Sanatan communities
+CULTURAL_COMMUNITIES = [
+    # Patel communities
+    "Leuva Patel", "Kadva Patel", "Anjana Patel", "Chaudhary Patel",
+    # Brahmin communities
+    "Brahmin", "Anavil Brahmin", "Audichya Brahmin", "Gaur Brahmin", "Kanyakubja Brahmin",
+    "Maithil Brahmin", "Nagar Brahmin", "Saraswat Brahmin", "Saryuparin Brahmin",
+    "Chitpavan Brahmin", "Deshastha Brahmin", "Karhade Brahmin", "Kokanastha Brahmin",
+    "Iyer", "Iyengar", "Namboothiri", "Telugu Brahmin", "Kannada Brahmin",
+    # Kshatriya communities
+    "Rajput", "Maratha", "Kshatriya", "Nair", "Bunts", "Thakur", "Chauhan",
+    "Rathore", "Sisodia", "Parmar", "Solanki", "Jadeja", "Jhala",
+    # Vaishya communities  
+    "Bania", "Agarwal", "Gupta", "Jain", "Marwari", "Maheshwari", "Oswal",
+    "Khandelwal", "Porwal", "Lohana", "Vaish", "Arora", "Khatri",
+    # Other major communities
+    "Yadav", "Kurmi", "Lodhi", "Jat", "Gujjar", "Ahir", "Koeri", "Mali",
+    "Teli", "Saini", "Kamma", "Kapu", "Reddy", "Naidu", "Velama",
+    "Lingayat", "Vokkaliga", "Gowda", "Nair", "Ezhava", "Menon",
+    "Pillai", "Chettiars", "Mudaliar", "Gounder", "Vanniyar", "Thevar",
+    # Artisan communities
+    "Vishwakarma", "Lohar", "Sonar", "Kumhar", "Darji", "Mochi",
+    "Suthar", "Kumbhar", "Soni", "Panchal", "Prajapati",
+    # Professional communities
+    "Kayastha", "Vaishya", "Baidya", "Teli", "Gandhi",
+    # Religious communities
+    "Swaminarayan", "Pushtimarg", "Vallabhacharya", "Nimbarka", "Ramanandi",
+    "Shaiva", "Vaishnava", "Shakta", "Smarta", "Goswami",
+    # Regional communities
+    "Sindhi", "Punjabi", "Gujarati", "Marathi", "Bengali", "Tamil",
+    "Telugu", "Kannada", "Malayalam", "Odia", "Assamese", "Bihari",
+    # Others
+    "Patidar", "Sikh", "Meena", "Bhil", "Gond", "Santhal", "Munda",
+    "Oraon", "Khasi", "Naga", "Mizo", "Manipuri", "Bodo", "Rabha"
+]
+
+@api_router.get("/cultural-communities")
+async def get_cultural_communities(search: Optional[str] = None):
+    """Get list of all cultural communities"""
+    communities = CULTURAL_COMMUNITIES.copy()
+    
+    if search:
+        search_lower = search.lower()
+        communities = [c for c in communities if search_lower in c.lower()]
+    
+    return sorted(communities)
+
+
+@api_router.get("/user/cultural-community")
+async def get_user_cultural_community(token_data: dict = Depends(verify_token)):
+    """Get user's cultural community info"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
+    return {
+        "cultural_community": user.get('cultural_community'),
+        "change_count": user.get('cultural_change_count', 0),
+        "is_locked": user.get('cultural_change_count', 0) >= 2
+    }
+
+
+@api_router.put("/user/cultural-community")
+async def update_cultural_community(data: CulturalCommunityUpdate, token_data: dict = Depends(verify_token)):
+    """Update user's cultural community (max 2 changes allowed)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
+    current_count = user.get('cultural_change_count', 0)
+    current_community = user.get('cultural_community')
+    
+    # If same community, no change needed
+    if current_community == data.cultural_community:
+        return {"message": "Cultural community unchanged", "change_count": current_count}
+    
+    # Check if locked
+    if current_count >= 2:
+        raise HTTPException(status_code=400, detail="Cultural community is locked. Maximum 2 changes allowed.")
+    
+    # Update community
+    new_count = current_count + 1 if current_community else 0  # First selection doesn't count as change
+    
+    await db.update_document('users', user_id, {
+        'cultural_community': data.cultural_community,
+        'cultural_change_count': new_count
+    })
+    
+    logger.info(f"User {user_id} updated cultural community to {data.cultural_community}")
+    
+    return {
+        "message": "Cultural community updated",
+        "cultural_community": data.cultural_community,
+        "change_count": new_count,
+        "is_locked": new_count >= 2
     }
 
 

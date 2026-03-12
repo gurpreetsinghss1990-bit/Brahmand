@@ -1,60 +1,125 @@
 import { create } from 'zustand';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { 
+  createHelpRequest as createHelpRequestAPI,
+  getActiveHelpRequest,
+  fulfillHelpRequest,
+  getHelpRequests,
+  getMyHelpRequests
+} from '../services/api';
 
 export interface HelpRequest {
   id: string;
-  type: 'blood' | 'medical' | 'financial' | 'other';
+  creator_id: string;
+  creator_name: string;
+  creator_photo?: string;
+  type: 'blood' | 'medical' | 'financial' | 'food' | 'other';
   title: string;
   description: string;
-  urgency: 'low' | 'medium' | 'urgent';
-  contactNumber: string;
-  visibility: 'area' | 'city' | 'state' | 'national';
-  createdAt: string;
-  status: 'active' | 'resolved';
+  community_level: 'area' | 'city' | 'state' | 'country';
+  location?: string;
+  contact_number: string;
+  urgency: 'normal' | 'urgent' | 'critical';
+  status: 'active' | 'fulfilled';
+  blood_group?: string;
+  hospital_name?: string;
+  amount?: number;
   verifications: number;
-  verifiedBy: string[];
+  verified_by: string[];
+  created_at: string;
 }
 
 interface HelpRequestStore {
   activeRequest: HelpRequest | null;
-  setActiveRequest: (request: HelpRequest | null) => void;
-  resolveRequest: () => void;
+  allRequests: HelpRequest[];
+  myRequests: HelpRequest[];
+  loading: boolean;
+  
+  // Actions
+  fetchActiveRequest: () => Promise<void>;
+  fetchAllRequests: (type?: string, communityLevel?: string) => Promise<void>;
+  fetchMyRequests: () => Promise<void>;
+  createRequest: (data: {
+    type: 'blood' | 'medical' | 'financial' | 'food' | 'other';
+    title: string;
+    description: string;
+    community_level?: 'area' | 'city' | 'state' | 'country';
+    location?: string;
+    contact_number: string;
+    urgency?: 'normal' | 'urgent' | 'critical';
+    blood_group?: string;
+    hospital_name?: string;
+    amount?: number;
+  }) => Promise<HelpRequest>;
+  resolveRequest: () => Promise<void>;
   hasActiveRequest: () => boolean;
-  loadFromStorage: () => Promise<void>;
 }
 
 export const useHelpRequestStore = create<HelpRequestStore>((set, get) => ({
   activeRequest: null,
+  allRequests: [],
+  myRequests: [],
+  loading: false,
   
-  setActiveRequest: async (request) => {
-    set({ activeRequest: request });
-    if (request) {
-      await AsyncStorage.setItem('active_help_request', JSON.stringify(request));
-    } else {
-      await AsyncStorage.removeItem('active_help_request');
+  fetchActiveRequest: async () => {
+    try {
+      const response = await getActiveHelpRequest();
+      set({ activeRequest: response.data });
+    } catch (error) {
+      console.error('Error fetching active request:', error);
+      set({ activeRequest: null });
     }
+  },
+  
+  fetchAllRequests: async (type?: string, communityLevel?: string) => {
+    set({ loading: true });
+    try {
+      const response = await getHelpRequests({ type, community_level: communityLevel });
+      set({ allRequests: response.data || [] });
+    } catch (error) {
+      console.error('Error fetching help requests:', error);
+      set({ allRequests: [] });
+    } finally {
+      set({ loading: false });
+    }
+  },
+  
+  fetchMyRequests: async () => {
+    try {
+      const response = await getMyHelpRequests();
+      set({ myRequests: response.data || [] });
+    } catch (error) {
+      console.error('Error fetching my requests:', error);
+      set({ myRequests: [] });
+    }
+  },
+  
+  createRequest: async (data) => {
+    const response = await createHelpRequestAPI(data);
+    const newRequest = response.data;
+    set({ activeRequest: newRequest });
+    return newRequest;
   },
   
   resolveRequest: async () => {
-    set({ activeRequest: null });
-    await AsyncStorage.removeItem('active_help_request');
+    const { activeRequest } = get();
+    if (!activeRequest) return;
+    
+    try {
+      await fulfillHelpRequest(activeRequest.id);
+      set({ activeRequest: null });
+    } catch (error) {
+      console.error('Error resolving request:', error);
+      throw error;
+    }
   },
   
   hasActiveRequest: () => {
-    return get().activeRequest !== null && get().activeRequest?.status === 'active';
-  },
-  
-  loadFromStorage: async () => {
-    try {
-      const stored = await AsyncStorage.getItem('active_help_request');
-      if (stored) {
-        const request = JSON.parse(stored);
-        if (request.status === 'active') {
-          set({ activeRequest: request });
-        }
-      }
-    } catch (error) {
-      console.error('Error loading help request:', error);
-    }
+    const { activeRequest } = get();
+    return activeRequest !== null && activeRequest.status === 'active';
   },
 }));
+
+// Legacy export for backwards compatibility
+export const loadFromStorage = async () => {
+  await useHelpRequestStore.getState().fetchActiveRequest();
+};

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -9,27 +9,32 @@ import {
   FlatList,
   TextInput,
   Linking,
-  Alert
+  Alert,
+  ActivityIndicator
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 import { VendorRegistrationModal } from '../../src/components/VendorRegistrationModal';
 import { useAuthStore } from '../../src/store/authStore';
-import { useVendorStore, Vendor, VENDOR_CATEGORIES } from '../../src/store/vendorStore';
+import { useVendorStore, Vendor, DEFAULT_CATEGORIES } from '../../src/store/vendorStore';
+import * as Location from 'expo-location';
 
 const TABS = ['Nearby', 'Pooja', 'Grocery', 'Restaurant', 'Festival'];
-
-const TRUST_LABELS = {
-  trusted: { label: 'Trusted Vendor', color: COLORS.success, icon: 'shield-checkmark' },
-  frequent: { label: 'Frequently Used', color: COLORS.info, icon: 'trending-up' },
-  verified_local: { label: 'Verified Local', color: COLORS.primary, icon: 'location' },
-};
 
 export default function VendorScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const { vendors, myVendor, addVendor, setMyVendor, getFilteredVendors, loadFromStorage } = useVendorStore();
+  const { 
+    vendors, 
+    myVendor, 
+    categories,
+    loading,
+    fetchVendors, 
+    fetchMyVendor,
+    fetchCategories,
+    createVendor 
+  } = useVendorStore();
   
   const [activeTab, setActiveTab] = useState('Nearby');
   const [refreshing, setRefreshing] = useState(false);
@@ -37,69 +42,94 @@ export default function VendorScreen() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [filteredCategories, setFilteredCategories] = useState<string[]>([]);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+
+  const loadData = useCallback(async () => {
+    // Get user location
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const location = await Location.getCurrentPositionAsync({});
+        setUserLocation({
+          lat: location.coords.latitude,
+          lng: location.coords.longitude
+        });
+        await fetchVendors({
+          lat: location.coords.latitude,
+          lng: location.coords.longitude
+        });
+      } else {
+        await fetchVendors();
+      }
+    } catch (error) {
+      await fetchVendors();
+    }
+    
+    await fetchMyVendor();
+    await fetchCategories();
+  }, []);
 
   useEffect(() => {
-    loadFromStorage();
+    loadData();
   }, []);
 
   useEffect(() => {
     if (searchTerm) {
-      const filtered = VENDOR_CATEGORIES.filter(cat => 
+      const filtered = categories.filter(cat => 
         cat.toLowerCase().includes(searchTerm.toLowerCase())
       );
       setFilteredCategories(filtered);
     } else {
       setFilteredCategories([]);
     }
-  }, [searchTerm]);
+  }, [searchTerm, categories]);
 
-  const displayVendors = getFilteredVendors(
+  const displayVendors = useVendorStore.getState().getFilteredVendors(
     activeTab === 'Nearby' ? undefined : activeTab,
-    searchTerm,
-    user?.id
+    searchTerm
   );
 
-  const handleRegisterVendor = async (data: any) => {
-    const newVendor: Vendor = {
-      id: Date.now().toString(),
-      businessName: data.businessName,
-      ownerName: data.ownerName,
-      phoneNumber: data.phoneNumber,
-      yearsInBusiness: data.yearsInBusiness,
-      categories: data.categories,
-      address: data.address,
-      locationLink: data.locationLink,
-      latitude: data.latitude,
-      longitude: data.longitude,
-      distance: 0,
-      trustLabel: 'verified_local',
-      galleryPhotos: data.photos || [],
-      ownerId: user?.id || '',
-      createdAt: new Date().toISOString(),
-    };
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+  };
 
-    addVendor(newVendor);
-    setMyVendor(newVendor);
-    Alert.alert('Success', 'Your business has been registered!');
+  const handleRegisterVendor = async (data: any) => {
+    try {
+      await createVendor({
+        business_name: data.businessName,
+        owner_name: data.ownerName,
+        years_in_business: data.yearsInBusiness || 0,
+        categories: data.categories,
+        full_address: data.address,
+        location_link: data.locationLink,
+        phone_number: data.phoneNumber,
+        latitude: data.latitude,
+        longitude: data.longitude
+      });
+      Alert.alert('Success', 'Your business has been registered!');
+      setShowRegistrationModal(false);
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.detail || 'Failed to register business');
+    }
   };
 
   const handleCall = (phone: string) => {
     Linking.openURL(`tel:${phone}`);
   };
 
-  const getVendorIcon = (categories: string[]) => {
-    const category = categories[0];
-    if (category?.includes('Pooja') || category?.includes('Pandit')) return 'flower';
-    if (category?.includes('Grocery') || category?.includes('Sweets')) return 'basket';
-    if (category?.includes('Restaurant') || category?.includes('Catering')) return 'restaurant';
-    if (category?.includes('Gym') || category?.includes('Yoga')) return 'fitness';
-    if (category?.includes('Salon')) return 'cut';
+  const getVendorIcon = (vendorCategories: string[]) => {
+    const category = vendorCategories[0]?.toLowerCase() || '';
+    if (category.includes('pooja') || category.includes('pandit')) return 'flower';
+    if (category.includes('grocery') || category.includes('sweets')) return 'basket';
+    if (category.includes('restaurant') || category.includes('catering')) return 'restaurant';
+    if (category.includes('gym') || category.includes('yoga')) return 'fitness';
+    if (category.includes('salon')) return 'cut';
     return 'storefront';
   };
 
   const renderVendor = ({ item }: { item: Vendor }) => {
-    const trustInfo = TRUST_LABELS[item.trustLabel];
-    
     return (
       <TouchableOpacity 
         style={styles.vendorCard}
@@ -107,7 +137,7 @@ export default function VendorScreen() {
       >
         {/* Business Image Placeholder */}
         <View style={styles.vendorImageContainer}>
-          {item.coverPhoto ? (
+          {item.photos && item.photos.length > 0 ? (
             <View style={styles.vendorImage}>
               <Ionicons name="image" size={24} color={COLORS.textLight} />
             </View>
@@ -119,25 +149,38 @@ export default function VendorScreen() {
         </View>
 
         <View style={styles.vendorInfo}>
-          <Text style={styles.vendorName}>{item.businessName}</Text>
+          <Text style={styles.vendorName}>{item.business_name}</Text>
           
-          {/* Trust Label */}
-          <View style={[styles.trustBadge, { backgroundColor: `${trustInfo.color}15` }]}>
-            <Ionicons name={trustInfo.icon as any} size={12} color={trustInfo.color} />
-            <Text style={[styles.trustText, { color: trustInfo.color }]}>{trustInfo.label}</Text>
+          {/* Categories */}
+          <View style={styles.categoriesRow}>
+            {item.categories.slice(0, 2).map((cat, idx) => (
+              <View key={idx} style={styles.categoryBadge}>
+                <Text style={styles.categoryBadgeText}>{cat}</Text>
+              </View>
+            ))}
+            {item.categories.length > 2 && (
+              <Text style={styles.moreCats}>+{item.categories.length - 2}</Text>
+            )}
           </View>
           
           {/* Distance */}
-          <View style={styles.distanceRow}>
-            <Ionicons name="location" size={12} color={COLORS.textLight} />
-            <Text style={styles.distanceText}>{item.distance?.toFixed(1)} km away</Text>
-          </View>
+          {item.distance !== undefined && item.distance !== null && (
+            <View style={styles.distanceRow}>
+              <Ionicons name="location" size={12} color={COLORS.textLight} />
+              <Text style={styles.distanceText}>
+                {item.distance < 1 
+                  ? `${Math.round(item.distance * 1000)}m away`
+                  : `${item.distance.toFixed(1)} km away`
+                }
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Call Button */}
         <TouchableOpacity 
           style={styles.callButton}
-          onPress={() => handleCall(item.phoneNumber)}
+          onPress={() => handleCall(item.phone_number)}
         >
           <Ionicons name="call" size={20} color={COLORS.primary} />
         </TouchableOpacity>
@@ -217,7 +260,7 @@ export default function VendorScreen() {
           </View>
           <View style={styles.myBusinessInfo}>
             <Text style={styles.myBusinessLabel}>Manage My Business</Text>
-            <Text style={styles.myBusinessName}>{myVendor.businessName}</Text>
+            <Text style={styles.myBusinessName}>{myVendor.business_name}</Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
         </TouchableOpacity>
@@ -234,6 +277,13 @@ export default function VendorScreen() {
         </TouchableOpacity>
       )}
 
+      {/* Loading State */}
+      {loading && vendors.length === 0 && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+        </View>
+      )}
+
       {/* Vendor List */}
       <FlatList
         data={displayVendors}
@@ -243,18 +293,18 @@ export default function VendorScreen() {
         refreshControl={
           <RefreshControl 
             refreshing={refreshing} 
-            onRefresh={() => {
-              setRefreshing(true);
-              setTimeout(() => setRefreshing(false), 1000);
-            }} 
+            onRefresh={handleRefresh}
+            colors={[COLORS.primary]}
           />
         }
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Ionicons name="storefront-outline" size={48} color={COLORS.textLight} />
-            <Text style={styles.emptyText}>No vendors found</Text>
-            <Text style={styles.emptySubtext}>Be the first to register in this area!</Text>
-          </View>
+          !loading ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="storefront-outline" size={48} color={COLORS.textLight} />
+              <Text style={styles.emptyText}>No vendors found</Text>
+              <Text style={styles.emptySubtext}>Be the first to register in this area!</Text>
+            </View>
+          ) : null
         }
       />
 
@@ -272,6 +322,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  loadingContainer: {
+    padding: SPACING.xl,
+    alignItems: 'center',
   },
   tabsContainer: {
     flexDirection: 'row',
@@ -432,19 +486,28 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     marginBottom: 4,
   },
-  trustBadge: {
+  categoriesRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 3,
-    borderRadius: 12,
+    flexWrap: 'wrap',
     marginBottom: 4,
   },
-  trustText: {
+  categoryBadge: {
+    backgroundColor: `${COLORS.primary}10`,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginRight: 4,
+    marginBottom: 2,
+  },
+  categoryBadgeText: {
     fontSize: 11,
-    fontWeight: '600',
-    marginLeft: 4,
+    color: COLORS.primary,
+    fontWeight: '500',
+  },
+  moreCats: {
+    fontSize: 11,
+    color: COLORS.textLight,
   },
   distanceRow: {
     flexDirection: 'row',

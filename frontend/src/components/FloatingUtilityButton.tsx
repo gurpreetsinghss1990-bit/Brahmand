@@ -8,39 +8,22 @@ import {
   ScrollView,
   Dimensions,
   Alert,
-  Platform
+  ActivityIndicator
 } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { COLORS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { useHelpRequestStore } from '../store/helpRequestStore';
-import type { HelpRequest } from '../store/helpRequestStore';
+import { getWisdom, getPanchang } from '../services/api';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-// Mock data for Sanatan Utilities
-const MOCK_GITA_SLOK = {
-  chapter: 2,
-  verse: 47,
-  sanskrit: "कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।\nमा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि॥",
-  translation: "You have a right to perform your prescribed duties, but you are not entitled to the fruits of your actions."
-};
-
-const MOCK_PANCHANG = {
-  tithi: "Shukla Dashami",
-  nakshatra: "Uttara Phalguni",
-};
-
-const MOCK_HOROSCOPE = {
-  sign: "Aries",
-  prediction: "Today is favorable for new beginnings."
-};
 
 const getHelpIcon = (type: string): string => {
   switch (type) {
     case 'blood': return 'water';
     case 'medical': return 'medkit';
     case 'financial': return 'cash';
+    case 'food': return 'restaurant';
     default: return 'hand-left';
   }
 };
@@ -50,17 +33,38 @@ const getHelpColor = (type: string): string => {
     case 'blood': return '#E53935';
     case 'medical': return '#1976D2';
     case 'financial': return '#43A047';
+    case 'food': return '#FB8C00';
     default: return COLORS.primary;
   }
 };
 
 export const FloatingUtilityButton = () => {
+  const router = useRouter();
   const [modalVisible, setModalVisible] = useState(false);
-  const { activeRequest, resolveRequest, loadFromStorage } = useHelpRequestStore();
+  const [loading, setLoading] = useState(false);
+  const { activeRequest, fetchActiveRequest, resolveRequest, hasActiveRequest } = useHelpRequestStore();
+  
+  // Wisdom and Panchang data
+  const [wisdom, setWisdom] = useState<any>(null);
+  const [panchang, setPanchang] = useState<any>(null);
 
   useEffect(() => {
-    loadFromStorage();
+    fetchActiveRequest();
+    loadUtilityData();
   }, []);
+
+  const loadUtilityData = async () => {
+    try {
+      const [wisdomRes, panchangRes] = await Promise.all([
+        getWisdom(),
+        getPanchang()
+      ]);
+      setWisdom(wisdomRes.data);
+      setPanchang(panchangRes.data);
+    } catch (error) {
+      console.error('Error loading utility data:', error);
+    }
+  };
 
   const handleSOS = () => {
     Alert.alert(
@@ -69,27 +73,35 @@ export const FloatingUtilityButton = () => {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Send SOS', style: 'destructive', onPress: () => {
-          alert('SOS Alert sent to nearby community members!');
+          Alert.alert('SOS Alert', 'SOS Alert sent to nearby community members!');
         }}
       ]
     );
   };
 
-  const handleStopHelp = () => {
+  const handleStopHelp = async () => {
     Alert.alert(
       'Resolve Help Request',
       'Has your help request been fulfilled? This will close the request and notify the community.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Confirm', onPress: () => {
-          resolveRequest();
-          setModalVisible(false);
+        { text: 'Confirm', onPress: async () => {
+          setLoading(true);
+          try {
+            await resolveRequest();
+            setModalVisible(false);
+            Alert.alert('Success', 'Your help request has been marked as fulfilled.');
+          } catch (error) {
+            Alert.alert('Error', 'Failed to resolve request. Please try again.');
+          } finally {
+            setLoading(false);
+          }
         }}
       ]
     );
   };
 
-  const hasActiveHelp = activeRequest?.status === 'active';
+  const isActiveHelp = hasActiveRequest();
 
   return (
     <>
@@ -100,7 +112,7 @@ export const FloatingUtilityButton = () => {
         activeOpacity={0.9}
       >
         <View style={styles.glassBackground}>
-          {hasActiveHelp ? (
+          {isActiveHelp && activeRequest ? (
             <Ionicons 
               name={getHelpIcon(activeRequest.type) as any} 
               size={22} 
@@ -124,14 +136,14 @@ export const FloatingUtilityButton = () => {
           activeOpacity={1}
           onPress={() => setModalVisible(false)}
         >
-          <View style={styles.modalContent}>
+          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
             <View style={styles.modalHandle} />
             
             <Text style={styles.modalTitle}>Sanatan Utilities</Text>
 
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Active Help Request Section */}
-              {hasActiveHelp && (
+              {isActiveHelp && activeRequest && (
                 <View style={styles.activeHelpCard}>
                   <View style={styles.activeHelpHeader}>
                     <View style={[styles.helpTypeBadge, { backgroundColor: `${getHelpColor(activeRequest.type)}20` }]}>
@@ -141,13 +153,21 @@ export const FloatingUtilityButton = () => {
                   </View>
                   <Text style={styles.activeHelpType}>{activeRequest.type.toUpperCase()} - {activeRequest.title}</Text>
                   <Text style={styles.activeHelpUrgency}>Urgency: {activeRequest.urgency}</Text>
+                  <Text style={styles.activeHelpLocation}>Location: {activeRequest.location || 'Not specified'}</Text>
                   
                   <TouchableOpacity 
                     style={styles.stopHelpButton}
                     onPress={handleStopHelp}
+                    disabled={loading}
                   >
-                    <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
-                    <Text style={styles.stopHelpText}>STOP HELP - Mark as Fulfilled</Text>
+                    {loading ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <>
+                        <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
+                        <Text style={styles.stopHelpText}>STOP HELP - Mark as Fulfilled</Text>
+                      </>
+                    )}
                   </TouchableOpacity>
                 </View>
               )}
@@ -160,22 +180,34 @@ export const FloatingUtilityButton = () => {
                   </View>
                   <View>
                     <Text style={styles.gitaTitle}>Bhagavad Gita Slok</Text>
-                    <Text style={styles.gitaSubtitle}>Chapter {MOCK_GITA_SLOK.chapter}, Verse {MOCK_GITA_SLOK.verse}</Text>
+                    <Text style={styles.gitaSubtitle}>
+                      {wisdom?.chapter ? `Chapter ${wisdom.chapter}, Verse ${wisdom.verse}` : 'Daily Wisdom'}
+                    </Text>
                   </View>
                 </View>
-                <Text style={styles.gitaSanskrit}>{MOCK_GITA_SLOK.sanskrit}</Text>
-                <Text style={styles.gitaTranslation}>{MOCK_GITA_SLOK.translation}</Text>
+                <Text style={styles.gitaSanskrit}>
+                  {wisdom?.sanskrit || 'कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।'}
+                </Text>
+                <Text style={styles.gitaTranslation}>
+                  {wisdom?.translation || wisdom?.quote || 'You have a right to perform your prescribed duties, but you are not entitled to the fruits of your actions.'}
+                </Text>
               </View>
 
               {/* Two Card Row */}
               <View style={styles.twoCardRow}>
-                <TouchableOpacity style={styles.mediumCard}>
+                <TouchableOpacity 
+                  style={styles.mediumCard}
+                  onPress={() => {
+                    setModalVisible(false);
+                    router.push('/panchang');
+                  }}
+                >
                   <View style={[styles.mediumIconBg, { backgroundColor: '#FFE5CC' }]}>
                     <Ionicons name="calendar" size={20} color={COLORS.primary} />
                   </View>
                   <Text style={styles.mediumTitle}>Today's Panchang</Text>
-                  <Text style={styles.mediumSubtext}>{MOCK_PANCHANG.tithi}</Text>
-                  <Text style={styles.mediumDetail}>{MOCK_PANCHANG.nakshatra}</Text>
+                  <Text style={styles.mediumSubtext}>{panchang?.tithi || 'Loading...'}</Text>
+                  <Text style={styles.mediumDetail}>{panchang?.nakshatra || ''}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.mediumCard}>
@@ -183,8 +215,10 @@ export const FloatingUtilityButton = () => {
                     <Ionicons name="star" size={20} color={COLORS.info} />
                   </View>
                   <Text style={styles.mediumTitle}>Daily Horoscope</Text>
-                  <Text style={styles.mediumSubtext}>{MOCK_HOROSCOPE.sign}</Text>
-                  <Text style={styles.mediumDetail} numberOfLines={2}>{MOCK_HOROSCOPE.prediction}</Text>
+                  <Text style={styles.mediumSubtext}>{panchang?.yoga || 'Shubh'}</Text>
+                  <Text style={styles.mediumDetail} numberOfLines={2}>
+                    {panchang?.karana || 'Today is favorable'}
+                  </Text>
                 </TouchableOpacity>
               </View>
 
@@ -264,7 +298,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     padding: SPACING.md,
     paddingBottom: SPACING.xl,
-    maxHeight: SCREEN_HEIGHT * 0.5,
+    maxHeight: SCREEN_HEIGHT * 0.6,
   },
   modalHandle: {
     width: 40,
@@ -317,6 +351,11 @@ const styles = StyleSheet.create({
   activeHelpUrgency: {
     fontSize: 13,
     color: COLORS.textSecondary,
+    marginBottom: 2,
+  },
+  activeHelpLocation: {
+    fontSize: 12,
+    color: COLORS.textLight,
     marginBottom: SPACING.md,
   },
   stopHelpButton: {

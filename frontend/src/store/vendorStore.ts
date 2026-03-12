@@ -1,156 +1,161 @@
 import { create } from 'zustand';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { 
+  createVendor as createVendorAPI,
+  getVendors,
+  getMyVendor,
+  getVendor,
+  updateVendor,
+  getVendorCategories,
+  deleteVendor as deleteVendorAPI
+} from '../services/api';
 
 export interface Vendor {
   id: string;
-  businessName: string;
-  ownerName: string;
-  phoneNumber: string;
-  yearsInBusiness: number;
+  owner_id: string;
+  business_name: string;
+  owner_name: string;
+  years_in_business: number;
   categories: string[];
-  address: string;
-  locationLink?: string;
+  full_address: string;
+  location_link?: string;
+  phone_number: string;
   latitude?: number;
   longitude?: number;
+  photos: string[];
   distance?: number;
-  coverPhoto?: string;
-  galleryPhotos: string[];
-  openingHours?: string;
-  offers?: string;
-  trustLabel: 'trusted' | 'frequent' | 'verified_local';
-  ownerId: string;
-  createdAt: string;
+  created_at: string;
 }
 
-export const VENDOR_CATEGORIES = [
+// Default categories to show when no backend data
+export const DEFAULT_CATEGORIES = [
   'Gym', 'Yoga', 'Pooja Samagri', 'Restaurant', 'Catering',
   'Pandit', 'Decoration', 'Flowers', 'Grocery', 'Sweets',
   'Clothing', 'Jewellery', 'Electronics', 'Pharmacy', 'Salon',
   'Photography', 'Event Planning', 'Transport', 'Astrology', 'Vastu',
-  'Music Classes', 'Dance Classes', 'Tutoring', 'Meditation', 'Ayurveda'
+  'Music Classes', 'Dance Classes', 'Tutoring', 'Meditation', 'Ayurveda',
+  'Swimming Coach', 'Gym Trainer', 'Temple Decorator', 'Pandit Services', 'Yoga Trainer'
 ];
 
 interface VendorStore {
   vendors: Vendor[];
   myVendor: Vendor | null;
-  setVendors: (vendors: Vendor[]) => void;
-  addVendor: (vendor: Vendor) => void;
-  setMyVendor: (vendor: Vendor | null) => void;
-  updateMyVendor: (updates: Partial<Vendor>) => void;
-  loadFromStorage: () => Promise<void>;
-  getFilteredVendors: (category?: string, searchTerm?: string, userId?: string) => Vendor[];
+  categories: string[];
+  loading: boolean;
+  
+  // Actions
+  fetchVendors: (params?: { category?: string; search?: string; lat?: number; lng?: number }) => Promise<void>;
+  fetchMyVendor: () => Promise<void>;
+  fetchVendor: (vendorId: string) => Promise<Vendor | null>;
+  fetchCategories: () => Promise<void>;
+  createVendor: (data: {
+    business_name: string;
+    owner_name: string;
+    years_in_business: number;
+    categories: string[];
+    full_address: string;
+    location_link?: string;
+    phone_number: string;
+    latitude?: number;
+    longitude?: number;
+  }) => Promise<Vendor>;
+  updateVendor: (vendorId: string, data: Partial<Vendor>) => Promise<void>;
+  deleteVendor: (vendorId: string) => Promise<void>;
+  getFilteredVendors: (category?: string, searchTerm?: string) => Vendor[];
 }
 
 export const useVendorStore = create<VendorStore>((set, get) => ({
-  vendors: [
-    {
-      id: '1',
-      businessName: 'Sharma Pooja Samagri',
-      ownerName: 'Ramesh Sharma',
-      phoneNumber: '9876543210',
-      yearsInBusiness: 15,
-      categories: ['Pooja Samagri', 'Flowers'],
-      address: 'Shop 12, Market Road, Borivali West, Mumbai 400092',
-      distance: 0.5,
-      trustLabel: 'trusted',
-      galleryPhotos: [],
-      ownerId: 'vendor1',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: '2',
-      businessName: 'Krishna Grocery Store',
-      ownerName: 'Krishna Patel',
-      phoneNumber: '9876543211',
-      yearsInBusiness: 8,
-      categories: ['Grocery', 'Sweets'],
-      address: 'Near Station, Kandivali East, Mumbai 400101',
-      distance: 1.2,
-      trustLabel: 'frequent',
-      galleryPhotos: [],
-      ownerId: 'vendor2',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: '3',
-      businessName: 'Annapurna Restaurant',
-      ownerName: 'Suresh Gupta',
-      phoneNumber: '9876543212',
-      yearsInBusiness: 12,
-      categories: ['Restaurant', 'Catering'],
-      address: 'Main Road, Malad West, Mumbai 400064',
-      distance: 2.0,
-      trustLabel: 'verified_local',
-      galleryPhotos: [],
-      ownerId: 'vendor3',
-      createdAt: new Date().toISOString(),
-    },
-  ],
+  vendors: [],
   myVendor: null,
+  categories: DEFAULT_CATEGORIES,
+  loading: false,
   
-  setVendors: (vendors) => set({ vendors }),
-  
-  addVendor: async (vendor) => {
-    set((state) => ({ vendors: [vendor, ...state.vendors] }));
-    await AsyncStorage.setItem('vendors', JSON.stringify(get().vendors));
-  },
-  
-  setMyVendor: async (vendor) => {
-    set({ myVendor: vendor });
-    if (vendor) {
-      await AsyncStorage.setItem('my_vendor', JSON.stringify(vendor));
-    } else {
-      await AsyncStorage.removeItem('my_vendor');
-    }
-  },
-  
-  updateMyVendor: async (updates) => {
-    const current = get().myVendor;
-    if (current) {
-      const updated = { ...current, ...updates };
-      set({ myVendor: updated });
-      await AsyncStorage.setItem('my_vendor', JSON.stringify(updated));
-      // Also update in vendors list
-      set((state) => ({
-        vendors: state.vendors.map(v => v.id === updated.id ? updated : v)
-      }));
-    }
-  },
-  
-  loadFromStorage: async () => {
+  fetchVendors: async (params) => {
+    set({ loading: true });
     try {
-      const myVendorStr = await AsyncStorage.getItem('my_vendor');
-      if (myVendorStr) {
-        set({ myVendor: JSON.parse(myVendorStr) });
-      }
+      const response = await getVendors(params);
+      set({ vendors: response.data || [] });
     } catch (error) {
-      console.error('Error loading vendor data:', error);
+      console.error('Error fetching vendors:', error);
+      set({ vendors: [] });
+    } finally {
+      set({ loading: false });
     }
   },
   
-  getFilteredVendors: (category, searchTerm, userId) => {
-    let filtered = get().vendors;
-    
-    // Filter out user's own vendor
-    if (userId) {
-      filtered = filtered.filter(v => v.ownerId !== userId);
+  fetchMyVendor: async () => {
+    try {
+      const response = await getMyVendor();
+      set({ myVendor: response.data });
+    } catch (error) {
+      console.error('Error fetching my vendor:', error);
+      set({ myVendor: null });
     }
+  },
+  
+  fetchVendor: async (vendorId: string) => {
+    try {
+      const response = await getVendor(vendorId);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching vendor:', error);
+      return null;
+    }
+  },
+  
+  fetchCategories: async () => {
+    try {
+      const response = await getVendorCategories();
+      const categories = response.data || [];
+      // Merge with defaults and deduplicate
+      const merged = [...new Set([...categories, ...DEFAULT_CATEGORIES])].sort();
+      set({ categories: merged });
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+      set({ categories: DEFAULT_CATEGORIES });
+    }
+  },
+  
+  createVendor: async (data) => {
+    const response = await createVendorAPI(data);
+    const newVendor = response.data;
+    set({ myVendor: newVendor });
+    return newVendor;
+  },
+  
+  updateVendor: async (vendorId, data) => {
+    await updateVendor(vendorId, data);
+    // Refresh my vendor
+    await get().fetchMyVendor();
+  },
+  
+  deleteVendor: async (vendorId) => {
+    await deleteVendorAPI(vendorId);
+    set({ myVendor: null });
+  },
+  
+  getFilteredVendors: (category, searchTerm) => {
+    let filtered = get().vendors;
     
     // Filter by category
     if (category && category !== 'Nearby') {
-      filtered = filtered.filter(v => v.categories.includes(category));
+      filtered = filtered.filter(v => v.categories.some(c => 
+        c.toLowerCase().includes(category.toLowerCase())
+      ));
     }
     
     // Filter by search term
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(v => 
-        v.businessName.toLowerCase().includes(term) ||
+        v.business_name.toLowerCase().includes(term) ||
         v.categories.some(c => c.toLowerCase().includes(term))
       );
     }
     
     // Sort by distance
-    return filtered.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+    return filtered.sort((a, b) => (a.distance || 9999) - (b.distance || 9999));
   },
 }));
+
+// Legacy exports for backwards compatibility
+export const VENDOR_CATEGORIES = DEFAULT_CATEGORIES;

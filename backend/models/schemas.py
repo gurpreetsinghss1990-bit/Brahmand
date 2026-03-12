@@ -337,3 +337,117 @@ class NotificationResponse(BaseModel):
     notification_type: str
     is_read: bool = False
     created_at: datetime
+
+
+# ================= HELP REQUEST MODELS =================
+
+class HelpType(str, Enum):
+    BLOOD = "blood"
+    MEDICAL = "medical"
+    FINANCIAL = "financial"
+    FOOD = "food"
+    OTHER = "other"
+
+
+class HelpUrgency(str, Enum):
+    NORMAL = "normal"
+    URGENT = "urgent"
+    CRITICAL = "critical"
+
+
+class HelpStatus(str, Enum):
+    ACTIVE = "active"
+    FULFILLED = "fulfilled"
+
+
+class CommunityLevel(str, Enum):
+    AREA = "area"
+    CITY = "city"
+    STATE = "state"
+    COUNTRY = "country"
+
+
+class HelpRequestCreate(BaseModel):
+    type: HelpType
+    title: str = Field(..., min_length=2, max_length=200)
+    description: str = Field(..., min_length=10, max_length=2000)
+    community_level: CommunityLevel = CommunityLevel.AREA
+    location: Optional[str] = None
+    contact_number: str
+    urgency: HelpUrgency = HelpUrgency.NORMAL
+    # Blood specific
+    blood_group: Optional[str] = None
+    hospital_name: Optional[str] = None
+    # Financial specific
+    amount: Optional[float] = None
+
+
+class HelpRequestResponse(BaseModel):
+    id: str
+    creator_id: str
+    creator_name: str
+    creator_photo: Optional[str] = None
+    type: str
+    title: str
+    description: str
+    community_level: str
+    location: Optional[str] = None
+    contact_number: str
+    urgency: str
+    status: str
+    blood_group: Optional[str] = None
+    hospital_name: Optional[str] = None
+    amount: Optional[float] = None
+    verifications: int = 0
+    verified_by: List[str] = []
+    created_at: datetime
+
+
+# ================= VENDOR MODELS =================
+
+class VendorCreate(BaseModel):
+    business_name: str = Field(..., min_length=2, max_length=200)
+    owner_name: str = Field(..., min_length=2, max_length=100)
+    years_in_business: int = Field(ge=0, le=100)
+    categories: List[str] = Field(..., min_items=1, max_items=5)
+    full_address: str = Field(..., min_length=10, max_length=500)
+    location_link: Optional[str] = None
+    phone_number: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+
+class VendorUpdate(BaseModel):
+    business_name: Optional[str] = Field(None, min_length=2, max_length=200)
+    owner_name: Optional[str] = Field(None, min_length=2, max_length=100)
+    years_in_business: Optional[int] = Field(None, ge=0, le=100)
+    categories: Optional[List[str]] = Field(None, min_items=1, max_items=5)
+    full_address: Optional[str] = Field(None, min_length=10, max_length=500)
+    location_link: Optional[str] = None
+    phone_number: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    photos: Optional[List[str]] = None
+
+
+class VendorResponse(BaseModel):
+    id: str
+    owner_id: str
+    business_name: str
+    owner_name: str
+    years_in_business: int
+    categories: List[str]
+    full_address: str
+    location_link: Optional[str] = None
+    phone_number: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    photos: List[str] = []
+    distance: Optional[float] = None
+    created_at: datetime
+
+
+# ================= CULTURAL COMMUNITY MODELS =================
+
+class CulturalCommunityUpdate(BaseModel):
+    cultural_community: str = Field(..., min_length=2, max_length=100)
