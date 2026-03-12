@@ -1,411 +1,516 @@
 #!/usr/bin/env python3
 """
-Comprehensive Backend Testing for Sanatan Lok - Message Status & Read Receipts
-Test the message status and read receipts functionality according to the review request.
+Backend API Testing Script for Circle Feature
+Comprehensive test for all Circle endpoints based on review request
 """
 
 import asyncio
 import aiohttp
 import json
 import sys
-import logging
 from datetime import datetime
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+BASE_URL = "https://brahmand-vendors.preview.emergentagent.com/api"
 
-# Base URLs
-BASE_URL = "https://brahmand-preview.preview.emergentagent.com/api"
-
-# Test configuration  
-PHONE_A = "+919999991111"
-PHONE_B = "+919999992222"
-OTP = "123456"
-
-class MessageStatusTester:
+class CircleTestSuite:
     def __init__(self):
         self.session = None
         self.user_a_token = None
         self.user_b_token = None
+        self.user_a_id = None
+        self.user_b_id = None
         self.user_a_sl_id = None
         self.user_b_sl_id = None
-        self.chat_id = None
-        
+        self.circle_id = None
+        self.circle_code = None
+        self.second_circle_id = None
+        self.second_circle_code = None
+        self.test_results = []
+
     async def setup_session(self):
-        """Initialize HTTP session"""
-        connector = aiohttp.TCPConnector(ssl=False)
-        timeout = aiohttp.ClientTimeout(total=30)
-        self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
-        
-    async def cleanup_session(self):
+        """Setup HTTP session"""
+        self.session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30),
+            headers={'Content-Type': 'application/json'}
+        )
+
+    async def teardown_session(self):
         """Close HTTP session"""
         if self.session:
             await self.session.close()
-            
-    async def make_request(self, method, endpoint, data=None, headers=None, expected_status=200):
-        """Make HTTP request with error handling"""
+
+    def log_result(self, test_name: str, success: bool, details: str = ""):
+        """Log test result"""
+        status = "✅ PASS" if success else "❌ FAIL"
+        result = f"{status} | {test_name}"
+        if details:
+            result += f" | {details}"
+        print(result)
+        self.test_results.append((test_name, success, details))
+
+    async def make_request(self, method: str, endpoint: str, data: dict = None, token: str = None):
+        """Make HTTP request"""
         url = f"{BASE_URL}{endpoint}"
-        
-        if headers is None:
-            headers = {}
+        headers = {}
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
         
         try:
-            if method.upper() == "GET":
-                async with self.session.get(url, headers=headers) as response:
-                    response_text = await response.text()
-                    
-                    if response.status != expected_status:
-                        logger.error(f"❌ {method} {endpoint} - Expected {expected_status}, got {response.status}")
-                        logger.error(f"Response: {response_text}")
-                        return None
-                        
-                    if response.content_type == 'application/json':
-                        return await response.json()
-                    return response_text
-                    
-            elif method.upper() == "POST":
-                async with self.session.post(url, json=data, headers=headers) as response:
-                    response_text = await response.text()
-                    
-                    if response.status != expected_status:
-                        logger.error(f"❌ {method} {endpoint} - Expected {expected_status}, got {response.status}")
-                        logger.error(f"Response: {response_text}")
-                        return None
-                        
-                    if response.content_type == 'application/json':
-                        return await response.json()
-                    return response_text
-                    
-            elif method.upper() == "PUT":
-                async with self.session.put(url, json=data, headers=headers) as response:
-                    response_text = await response.text()
-                    
-                    if response.status != expected_status:
-                        logger.error(f"❌ {method} {endpoint} - Expected {expected_status}, got {response.status}")
-                        logger.error(f"Response: {response_text}")
-                        return None
-                        
-                    if response.content_type == 'application/json':
-                        return await response.json()
-                    return response_text
-                    
+            if method == 'GET':
+                async with self.session.get(url, headers=headers) as resp:
+                    return resp.status, await resp.json()
+            elif method == 'POST':
+                async with self.session.post(url, json=data, headers=headers) as resp:
+                    return resp.status, await resp.json()
+            elif method == 'PUT':
+                async with self.session.put(url, json=data, headers=headers) as resp:
+                    return resp.status, await resp.json()
+            elif method == 'DELETE':
+                async with self.session.delete(url, headers=headers) as resp:
+                    return resp.status, await resp.json()
         except Exception as e:
-            logger.error(f"❌ Request failed: {method} {endpoint} - {str(e)}")
-            return None
-            
-    async def create_user(self, phone, name):
-        """Create a user with OTP auth and registration"""
-        logger.info(f"🔐 Creating user {name} with phone {phone}")
-        
-        # Step 1: Send OTP
-        otp_data = {"phone": phone}
-        response = await self.make_request("POST", "/auth/send-otp", otp_data)
-        if not response:
-            return None, None
-            
-        logger.info(f"✅ OTP sent to {phone}")
-        
-        # Step 2: Verify OTP
-        verify_data = {"phone": phone, "otp": OTP}
-        response = await self.make_request("POST", "/auth/verify-otp", verify_data)
-        if not response:
-            return None, None
-            
-        if response.get("is_new_user"):
-            logger.info(f"✅ OTP verified for new user")
-            
-            # Step 3: Register user
-            register_data = {
-                "phone": phone,
-                "name": name,
-                "language": "English"
-            }
-            response = await self.make_request("POST", "/auth/register", register_data)
-            if not response:
-                return None, None
-                
-            token = response.get("token")
-            sl_id = response.get("user", {}).get("sl_id")
-            logger.info(f"✅ User {name} registered with SL-ID: {sl_id}")
-            return token, sl_id
-        else:
-            # Existing user
-            token = response.get("token")
-            sl_id = response.get("user", {}).get("sl_id")
-            logger.info(f"✅ Existing user {name} logged in with SL-ID: {sl_id}")
-            return token, sl_id
-            
-    async def test_1_setup_users(self):
-        """Test 1: Setup - Create User A and User B"""
-        logger.info("🧪 TEST 1: Setup - Creating users")
-        
-        self.user_a_token, self.user_a_sl_id = await self.create_user(PHONE_A, "User A")
-        if not self.user_a_token:
-            logger.error("❌ Failed to create User A")
-            return False
-            
-        self.user_b_token, self.user_b_sl_id = await self.create_user(PHONE_B, "User B")
-        if not self.user_b_token:
-            logger.error("❌ Failed to create User B")
-            return False
-            
-        logger.info(f"✅ TEST 1 PASSED - Users created: A({self.user_a_sl_id}), B({self.user_b_sl_id})")
-        return True
-        
-    async def test_2_send_first_message(self):
-        """Test 2: User A sends message to User B"""
-        logger.info("🧪 TEST 2: User A sends message to User B")
-        
-        headers = {"Authorization": f"Bearer {self.user_a_token}"}
-        message_data = {
-            "recipient_sl_id": self.user_b_sl_id,
-            "content": "Test message status"
-        }
-        
-        response = await self.make_request("POST", "/dm", message_data, headers)
-        if not response:
-            logger.error("❌ Failed to send message")
-            return False
-            
-        self.chat_id = response.get("chat_id")
-        message = response.get("message", {})
-        
-        if not self.chat_id:
-            logger.error("❌ No chat_id returned")
-            return False
-            
-        logger.info(f"✅ TEST 2 PASSED - Message sent, chat_id: {self.chat_id}")
-        logger.info(f"📨 Message status: {message.get('status', 'unknown')}")
-        return True
-        
-    async def test_3_verify_delivered_status(self):
-        """Test 3: Verify message has 'delivered' status"""
-        logger.info("🧪 TEST 3: Verify message status is 'delivered'")
-        
-        headers = {"Authorization": f"Bearer {self.user_a_token}"}
-        
-        response = await self.make_request("GET", f"/dm/{self.chat_id}", None, headers)
-        if not response:
-            logger.error("❌ Failed to get messages")
-            return False
-            
-        messages = response if isinstance(response, list) else []
-        if not messages:
-            logger.error("❌ No messages found")
-            return False
-            
-        latest_message = messages[-1]  # Get the latest message
-        status = latest_message.get("status", "unknown")
-        
-        if status != "delivered":
-            logger.error(f"❌ Expected 'delivered', got '{status}'")
-            return False
-            
-        logger.info(f"✅ TEST 3 PASSED - Message status is 'delivered'")
-        return True
-        
-    async def test_4_mark_messages_read(self):
-        """Test 4: User B opens chat and marks messages as read"""
-        logger.info("🧪 TEST 4: User B marks messages as read")
-        
-        headers = {"Authorization": f"Bearer {self.user_b_token}"}
-        
-        response = await self.make_request("POST", f"/dm/{self.chat_id}/read", None, headers)
-        if not response:
-            logger.error("❌ Failed to mark messages as read")
-            return False
-            
-        message = response.get("message", "")
-        if "Read receipts disabled" in message:
-            logger.error("❌ Read receipts are disabled when they should be enabled")
-            return False
-            
-        logger.info(f"✅ TEST 4 PASSED - Messages marked as read: {message}")
-        return True
-        
-    async def test_5_verify_read_status(self):
-        """Test 5: User A checks message status (should be 'read')"""
-        logger.info("🧪 TEST 5: Verify message status changed to 'read'")
-        
-        headers = {"Authorization": f"Bearer {self.user_a_token}"}
-        
-        # Wait a moment for status to update
-        await asyncio.sleep(1)
-        
-        response = await self.make_request("GET", f"/dm/{self.chat_id}", None, headers)
-        if not response:
-            logger.error("❌ Failed to get messages")
-            return False
-            
-        messages = response if isinstance(response, list) else []
-        if not messages:
-            logger.error("❌ No messages found")
-            return False
-            
-        latest_message = messages[-1]  # Get the latest message
-        status = latest_message.get("status", "unknown")
-        
-        if status != "read":
-            logger.error(f"❌ Expected 'read', got '{status}'")
-            return False
-            
-        logger.info(f"✅ TEST 5 PASSED - Message status is now 'read'")
-        return True
-        
-    async def test_6_disable_read_receipts(self):
-        """Test 6: Test privacy setting - disable read receipts"""
-        logger.info("🧪 TEST 6: User B disables read receipts")
-        
-        headers = {"Authorization": f"Bearer {self.user_b_token}"}
-        privacy_settings = {"read_receipts": False}
-        
-        response = await self.make_request("PUT", "/user/privacy-settings", privacy_settings, headers)
-        if not response:
-            logger.error("❌ Failed to update privacy settings")
-            return False
-            
-        settings = response.get("settings", {})
-        if settings.get("read_receipts") is not False:
-            logger.error("❌ Read receipts not disabled properly")
-            return False
-            
-        logger.info(f"✅ TEST 6 PASSED - Read receipts disabled")
-        return True
-        
-    async def test_7_send_second_message(self):
-        """Test 7: User A sends another message"""
-        logger.info("🧪 TEST 7: User A sends second message")
-        
-        headers = {"Authorization": f"Bearer {self.user_a_token}"}
-        message_data = {
-            "recipient_sl_id": self.user_b_sl_id,
-            "content": "Second test message"
-        }
-        
-        response = await self.make_request("POST", "/dm", message_data, headers)
-        if not response:
-            logger.error("❌ Failed to send second message")
-            return False
-            
-        message = response.get("message", {})
-        status = message.get("status", "unknown")
-        
-        if status != "delivered":
-            logger.error(f"❌ Expected 'delivered', got '{status}'")
-            return False
-            
-        logger.info(f"✅ TEST 7 PASSED - Second message sent with status 'delivered'")
-        return True
-        
-    async def test_8_blocked_read_receipts(self):
-        """Test 8: User B marks as read (should be blocked)"""
-        logger.info("🧪 TEST 8: User B attempts to mark as read (should be blocked)")
-        
-        headers = {"Authorization": f"Bearer {self.user_b_token}"}
-        
-        response = await self.make_request("POST", f"/dm/{self.chat_id}/read", None, headers)
-        if not response:
-            logger.error("❌ Failed to make mark-as-read request")
-            return False
-            
-        message = response.get("message", "")
-        if "Read receipts disabled" not in message:
-            logger.error(f"❌ Expected 'Read receipts disabled', got '{message}'")
-            return False
-            
-        logger.info(f"✅ TEST 8 PASSED - Read receipts properly blocked: {message}")
-        return True
-        
-    async def test_9_status_remains_delivered(self):
-        """Test 9: User A checks - status should still be 'delivered'"""
-        logger.info("🧪 TEST 9: Verify second message status remains 'delivered'")
-        
-        headers = {"Authorization": f"Bearer {self.user_a_token}"}
-        
-        response = await self.make_request("GET", f"/dm/{self.chat_id}", None, headers)
-        if not response:
-            logger.error("❌ Failed to get messages")
-            return False
-            
-        messages = response if isinstance(response, list) else []
-        if len(messages) < 2:
-            logger.error("❌ Expected at least 2 messages")
-            return False
-            
-        second_message = messages[-1]  # Get the latest (second) message
-        status = second_message.get("status", "unknown")
-        
-        if status != "delivered":
-            logger.error(f"❌ Expected 'delivered', got '{status}'")
-            return False
-            
-        logger.info(f"✅ TEST 9 PASSED - Second message status remains 'delivered' (not 'read')")
-        return True
-        
-    async def run_all_tests(self):
-        """Run all message status and read receipts tests"""
-        logger.info("🚀 Starting Message Status & Read Receipts Testing")
-        logger.info("=" * 60)
-        
-        tests = [
-            self.test_1_setup_users,
-            self.test_2_send_first_message,
-            self.test_3_verify_delivered_status,
-            self.test_4_mark_messages_read,
-            self.test_5_verify_read_status,
-            self.test_6_disable_read_receipts,
-            self.test_7_send_second_message,
-            self.test_8_blocked_read_receipts,
-            self.test_9_status_remains_delivered,
-        ]
-        
-        passed = 0
-        failed = 0
-        
-        for i, test in enumerate(tests, 1):
-            try:
-                result = await test()
-                if result:
-                    passed += 1
-                else:
-                    failed += 1
-                    logger.error(f"❌ Test {i} failed")
-            except Exception as e:
-                failed += 1
-                logger.error(f"❌ Test {i} failed with exception: {str(e)}")
-                
-            logger.info("-" * 40)
-            
-        # Summary
-        logger.info("=" * 60)
-        logger.info("🏁 TEST SUMMARY")
-        logger.info(f"✅ Passed: {passed}")
-        logger.info(f"❌ Failed: {failed}")
-        logger.info(f"📊 Success Rate: {(passed/(passed+failed)*100):.1f}%")
-        
-        if failed == 0:
-            logger.info("🎉 ALL TESTS PASSED! Message status and read receipts working correctly.")
-        else:
-            logger.error("💥 SOME TESTS FAILED! Check the logs above for details.")
-            
-        return failed == 0
+            return 500, {"error": str(e)}
 
+    async def test_01_create_user_a(self):
+        """Create User A with OTP auth"""
+        print("\n=== Test 1: Create User A (+911111100001) ===")
+        
+        # Send OTP
+        status, response = await self.make_request('POST', '/auth/send-otp', {
+            "phone": "+911111100001"
+        })
+        
+        if status != 200:
+            self.log_result("User A OTP Send", False, f"Status: {status}, Response: {response}")
+            return False
+
+        # Verify OTP (mock: 123456)
+        status, response = await self.make_request('POST', '/auth/verify-otp', {
+            "phone": "+911111100001",
+            "otp": "123456"
+        })
+        
+        if status != 200 or not response.get('is_new_user'):
+            self.log_result("User A OTP Verify", False, f"Status: {status}, Response: {response}")
+            return False
+
+        # Register User A
+        status, response = await self.make_request('POST', '/auth/register', {
+            "phone": "+911111100001",
+            "name": "User Alpha",
+            "language": "English"
+        })
+        
+        if status != 200 or not response.get('token'):
+            self.log_result("User A Registration", False, f"Status: {status}, Response: {response}")
+            return False
+
+        self.user_a_token = response['token']
+        self.user_a_id = response['user']['id']
+        self.user_a_sl_id = response['user']['sl_id']
+        
+        self.log_result("User A Creation", True, f"SL-ID: {self.user_a_sl_id}, ID: {self.user_a_id}")
+        return True
+
+    async def test_02_create_user_b(self):
+        """Create User B with OTP auth"""
+        print("\n=== Test 2: Create User B (+911111100002) ===")
+        
+        # Send OTP
+        status, response = await self.make_request('POST', '/auth/send-otp', {
+            "phone": "+911111100002"
+        })
+        
+        if status != 200:
+            self.log_result("User B OTP Send", False, f"Status: {status}, Response: {response}")
+            return False
+
+        # Verify OTP (mock: 123456)
+        status, response = await self.make_request('POST', '/auth/verify-otp', {
+            "phone": "+911111100002",
+            "otp": "123456"
+        })
+        
+        if status != 200 or not response.get('is_new_user'):
+            self.log_result("User B OTP Verify", False, f"Status: {status}, Response: {response}")
+            return False
+
+        # Register User B
+        status, response = await self.make_request('POST', '/auth/register', {
+            "phone": "+911111100002",
+            "name": "User Beta",
+            "language": "English"
+        })
+        
+        if status != 200 or not response.get('token'):
+            self.log_result("User B Registration", False, f"Status: {status}, Response: {response}")
+            return False
+
+        self.user_b_token = response['token']
+        self.user_b_id = response['user']['id']
+        self.user_b_sl_id = response['user']['sl_id']
+        
+        self.log_result("User B Creation", True, f"SL-ID: {self.user_b_sl_id}, ID: {self.user_b_id}")
+        return True
+
+    async def test_03_create_circle(self):
+        """Test Circle Creation (User A)"""
+        print("\n=== Test 3: Create Circle (User A) ===")
+        
+        status, response = await self.make_request('POST', '/circles', {
+            "name": "Family Circle",
+            "description": "A circle for my family members",
+            "privacy": "private"
+        }, self.user_a_token)
+        
+        if status != 200:
+            self.log_result("Circle Creation", False, f"Status: {status}, Response: {response}")
+            return False
+
+        # Validate response
+        required_fields = ['id', 'name', 'description', 'code', 'privacy', 'creator_id', 'admin_id', 'member_count', 'is_admin']
+        for field in required_fields:
+            if field not in response:
+                self.log_result("Circle Creation", False, f"Missing field: {field}")
+                return False
+
+        self.circle_id = response['id']
+        self.circle_code = response['code']
+        
+        # Validate values
+        if (response['name'] != "Family Circle" or 
+            response['description'] != "A circle for my family members" or
+            response['privacy'] != "private" or
+            response['creator_id'] != self.user_a_id or
+            response['admin_id'] != self.user_a_id or
+            response['member_count'] != 1 or
+            response['is_admin'] != True):
+            self.log_result("Circle Creation", False, f"Invalid values in response: {response}")
+            return False
+
+        self.log_result("Circle Creation", True, f"Circle ID: {self.circle_id}, Code: {self.circle_code}")
+        return True
+
+    async def test_04_get_circles(self):
+        """Test Get Circles (User A)"""
+        print("\n=== Test 4: Get Circles (User A) ===")
+        
+        status, response = await self.make_request('GET', '/circles', token=self.user_a_token)
+        
+        if status != 200:
+            self.log_result("Get Circles", False, f"Status: {status}, Response: {response}")
+            return False
+
+        if not isinstance(response, list) or len(response) == 0:
+            self.log_result("Get Circles", False, f"Expected non-empty list, got: {response}")
+            return False
+
+        # Check if created circle is in the list
+        found_circle = None
+        for circle in response:
+            if circle.get('id') == self.circle_id:
+                found_circle = circle
+                break
+
+        if not found_circle:
+            self.log_result("Get Circles", False, f"Created circle not found in list: {response}")
+            return False
+
+        self.log_result("Get Circles", True, f"Found {len(response)} circles, including created circle")
+        return True
+
+    async def test_05_get_circle_details(self):
+        """Test Get Circle Details (User A)"""
+        print("\n=== Test 5: Get Circle Details (User A) ===")
+        
+        status, response = await self.make_request('GET', f'/circles/{self.circle_id}', token=self.user_a_token)
+        
+        if status != 200:
+            self.log_result("Get Circle Details", False, f"Status: {status}, Response: {response}")
+            return False
+
+        # Validate response has members list
+        if 'members' not in response:
+            self.log_result("Get Circle Details", False, f"Missing members field: {response}")
+            return False
+
+        if not isinstance(response['members'], list) or len(response['members']) != 1:
+            self.log_result("Get Circle Details", False, f"Expected 1 member, got: {len(response['members'])}")
+            return False
+
+        # Check if User A is in members
+        if response['members'][0]['user_id'] != self.user_a_id:
+            self.log_result("Get Circle Details", False, f"User A not found in members: {response['members']}")
+            return False
+
+        self.log_result("Get Circle Details", True, f"Circle has {len(response['members'])} member(s)")
+        return True
+
+    async def test_06_join_circle_with_code(self):
+        """Test Join Circle with Code (User B)"""
+        print("\n=== Test 6: Join Circle with Code (User B) ===")
+        
+        status, response = await self.make_request('POST', '/circles/join', {
+            "code": self.circle_code
+        }, self.user_b_token)
+        
+        if status != 200:
+            self.log_result("Join Circle with Code", False, f"Status: {status}, Response: {response}")
+            return False
+
+        # For private circles, should return "pending" status
+        if response.get('status') != 'pending':
+            self.log_result("Join Circle with Code", False, f"Expected 'pending' status, got: {response}")
+            return False
+
+        self.log_result("Join Circle with Code", True, f"Join request sent, status: {response.get('status')}")
+        return True
+
+    async def test_07_get_join_requests(self):
+        """Test Get Join Requests (User A - Admin)"""
+        print("\n=== Test 7: Get Join Requests (User A - Admin) ===")
+        
+        status, response = await self.make_request('GET', f'/circles/{self.circle_id}/requests', token=self.user_a_token)
+        
+        if status != 200:
+            self.log_result("Get Join Requests", False, f"Status: {status}, Response: {response}")
+            return False
+
+        if not isinstance(response, list):
+            self.log_result("Get Join Requests", False, f"Expected list, got: {response}")
+            return False
+
+        # Should have User B's request
+        found_request = None
+        for request in response:
+            if request.get('user_id') == self.user_b_id:
+                found_request = request
+                break
+
+        if not found_request:
+            self.log_result("Get Join Requests", False, f"User B's request not found in: {response}")
+            return False
+
+        self.log_result("Get Join Requests", True, f"Found {len(response)} pending request(s), including User B's")
+        return True
+
+    async def test_08_approve_request(self):
+        """Test Approve Request (User A)"""
+        print("\n=== Test 8: Approve Request (User A) ===")
+        
+        status, response = await self.make_request('POST', f'/circles/{self.circle_id}/approve/{self.user_b_id}', 
+                                                 token=self.user_a_token)
+        
+        if status != 200:
+            self.log_result("Approve Request", False, f"Status: {status}, Response: {response}")
+            return False
+
+        # Verify User B is now a member - check circle details
+        status, circle_response = await self.make_request('GET', f'/circles/{self.circle_id}', token=self.user_a_token)
+        
+        if status != 200:
+            self.log_result("Approve Request", False, f"Failed to get circle after approval: {status}")
+            return False
+
+        # Check if User B is in members
+        user_b_found = False
+        for member in circle_response.get('members', []):
+            if member.get('user_id') == self.user_b_id:
+                user_b_found = True
+                break
+
+        if not user_b_found:
+            self.log_result("Approve Request", False, f"User B not found in members after approval: {circle_response.get('members')}")
+            return False
+
+        self.log_result("Approve Request", True, f"User B approved and added to circle")
+        return True
+
+    async def test_09_circle_messaging(self):
+        """Test Circle Messaging"""
+        print("\n=== Test 9: Circle Messaging ===")
+        
+        # User A sends message
+        status, response = await self.make_request('POST', f'/messages/circle/{self.circle_id}', {
+            "content": "Hello everyone!",
+            "message_type": "text"
+        }, self.user_a_token)
+        
+        if status != 200:
+            self.log_result("Circle Messaging - User A", False, f"Status: {status}, Response: {response}")
+            return False
+
+        # User B sends message
+        status, response = await self.make_request('POST', f'/messages/circle/{self.circle_id}', {
+            "content": "Hi back!",
+            "message_type": "text"
+        }, self.user_b_token)
+        
+        if status != 200:
+            self.log_result("Circle Messaging - User B", False, f"Status: {status}, Response: {response}")
+            return False
+
+        # Get messages
+        status, messages = await self.make_request('GET', f'/messages/circle/{self.circle_id}', token=self.user_a_token)
+        
+        if status != 200:
+            self.log_result("Circle Messaging - Get Messages", False, f"Status: {status}, Response: {messages}")
+            return False
+
+        if not isinstance(messages, list) or len(messages) != 2:
+            self.log_result("Circle Messaging - Get Messages", False, f"Expected 2 messages, got: {len(messages) if isinstance(messages, list) else 'not list'}")
+            return False
+
+        # Check message contents
+        message_contents = [msg.get('content') for msg in messages]
+        if "Hello everyone!" not in message_contents or "Hi back!" not in message_contents:
+            self.log_result("Circle Messaging - Get Messages", False, f"Messages not found: {message_contents}")
+            return False
+
+        self.log_result("Circle Messaging", True, f"Both messages sent and retrieved successfully")
+        return True
+
+    async def test_10_circle_with_invite_code_privacy(self):
+        """Test Circle with Invite Code Privacy"""
+        print("\n=== Test 10: Circle with Invite Code Privacy ===")
+        
+        # User A creates another circle with privacy "invite_code"
+        status, response = await self.make_request('POST', '/circles', {
+            "name": "Open Circle",
+            "description": "A circle with invite code privacy",
+            "privacy": "invite_code"
+        }, self.user_a_token)
+        
+        if status != 200:
+            self.log_result("Create Invite Code Circle", False, f"Status: {status}, Response: {response}")
+            return False
+
+        self.second_circle_id = response['id']
+        self.second_circle_code = response['code']
+        
+        # User B joins using code - should join directly without approval
+        status, response = await self.make_request('POST', '/circles/join', {
+            "code": self.second_circle_code
+        }, self.user_b_token)
+        
+        if status != 200:
+            self.log_result("Join Invite Code Circle", False, f"Status: {status}, Response: {response}")
+            return False
+
+        # Should return "joined" status for invite_code privacy
+        if response.get('status') != 'joined':
+            self.log_result("Join Invite Code Circle", False, f"Expected 'joined' status, got: {response}")
+            return False
+
+        # Verify User B is immediately a member
+        status, circle_response = await self.make_request('GET', f'/circles/{self.second_circle_id}', token=self.user_a_token)
+        
+        if status != 200:
+            self.log_result("Verify Invite Code Join", False, f"Failed to get circle: {status}")
+            return False
+
+        user_b_found = False
+        for member in circle_response.get('members', []):
+            if member.get('user_id') == self.user_b_id:
+                user_b_found = True
+                break
+
+        if not user_b_found:
+            self.log_result("Verify Invite Code Join", False, f"User B not found in members: {circle_response.get('members')}")
+            return False
+
+        self.log_result("Circle with Invite Code Privacy", True, f"User B joined directly without approval")
+        return True
+
+    async def test_11_leave_circle(self):
+        """Test Leave Circle (User B)"""
+        print("\n=== Test 11: Leave Circle (User B) ===")
+        
+        status, response = await self.make_request('POST', f'/circles/{self.circle_id}/leave', 
+                                                 token=self.user_b_token)
+        
+        if status != 200:
+            self.log_result("Leave Circle", False, f"Status: {status}, Response: {response}")
+            return False
+
+        # Verify User B is no longer a member
+        status, circle_response = await self.make_request('GET', f'/circles/{self.circle_id}', token=self.user_a_token)
+        
+        if status != 200:
+            self.log_result("Verify Leave Circle", False, f"Failed to get circle after leave: {status}")
+            return False
+
+        # Check if User B is still in members (should not be)
+        user_b_found = False
+        for member in circle_response.get('members', []):
+            if member.get('user_id') == self.user_b_id:
+                user_b_found = True
+                break
+
+        if user_b_found:
+            self.log_result("Leave Circle", False, f"User B still found in members after leaving: {circle_response.get('members')}")
+            return False
+
+        self.log_result("Leave Circle", True, f"User B successfully left the circle")
+        return True
+
+    async def run_all_tests(self):
+        """Run all tests in sequence"""
+        print("🚀 Starting Circle Feature Comprehensive Testing")
+        print("=" * 60)
+        
+        await self.setup_session()
+        
+        try:
+            tests = [
+                self.test_01_create_user_a,
+                self.test_02_create_user_b,
+                self.test_03_create_circle,
+                self.test_04_get_circles,
+                self.test_05_get_circle_details,
+                self.test_06_join_circle_with_code,
+                self.test_07_get_join_requests,
+                self.test_08_approve_request,
+                self.test_09_circle_messaging,
+                self.test_10_circle_with_invite_code_privacy,
+                self.test_11_leave_circle,
+            ]
+            
+            success_count = 0
+            for test in tests:
+                try:
+                    success = await test()
+                    if success:
+                        success_count += 1
+                    else:
+                        # Continue with other tests even if one fails
+                        continue
+                except Exception as e:
+                    self.log_result(test.__name__, False, f"Exception: {str(e)}")
+            
+            # Summary
+            print(f"\n{'='*60}")
+            print(f"📊 TEST SUMMARY")
+            print(f"{'='*60}")
+            print(f"✅ Passed: {success_count}/{len(tests)}")
+            print(f"❌ Failed: {len(tests) - success_count}/{len(tests)}")
+            print(f"📈 Success Rate: {(success_count/len(tests)*100):.1f}%")
+            
+            if success_count == len(tests):
+                print("🎉 All Circle feature tests PASSED!")
+            else:
+                print("⚠️  Some tests FAILED - see details above")
+            
+            return success_count == len(tests)
+            
+        finally:
+            await self.teardown_session()
 
 async def main():
-    """Main test runner"""
-    tester = MessageStatusTester()
-    
-    try:
-        await tester.setup_session()
-        success = await tester.run_all_tests()
-        sys.exit(0 if success else 1)
-    except Exception as e:
-        logger.error(f"Fatal error: {str(e)}")
-        sys.exit(1)
-    finally:
-        await tester.cleanup_session()
-
+    """Main function"""
+    tester = CircleTestSuite()
+    success = await tester.run_all_tests()
+    sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -43,13 +43,33 @@ export default function CirclesScreen() {
         <Ionicons name="ellipse" size={24} color={COLORS.primary} />
       </View>
       <View style={styles.circleInfo}>
-        <Text style={styles.circleName}>{item.name}</Text>
+        <View style={styles.circleHeader}>
+          <Text style={styles.circleName} numberOfLines={1}>{item.name}</Text>
+          {item.is_admin && (
+            <View style={styles.adminBadge}>
+              <Ionicons name="shield-checkmark" size={12} color={COLORS.warning} />
+              <Text style={styles.adminText}>Admin</Text>
+            </View>
+          )}
+        </View>
+        {item.description ? (
+          <Text style={styles.circleDescription} numberOfLines={1}>{item.description}</Text>
+        ) : null}
         <View style={styles.circleMeta}>
           <View style={styles.memberCount}>
             <Ionicons name="people" size={14} color={COLORS.textSecondary} />
             <Text style={styles.memberText}>{item.member_count} members</Text>
           </View>
-          <Text style={styles.codeText}>Code: {item.code}</Text>
+          <View style={styles.privacyIndicator}>
+            <Ionicons 
+              name={item.privacy === 'private' ? 'lock-closed' : 'key'} 
+              size={12} 
+              color={COLORS.textLight} 
+            />
+            <Text style={styles.codeText}>
+              {item.privacy === 'private' ? 'Private' : item.code}
+            </Text>
+          </View>
         </View>
       </View>
       <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
@@ -169,10 +189,35 @@ const styles = StyleSheet.create({
   circleInfo: {
     flex: 1,
   },
+  circleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
   circleName: {
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.text,
+    flex: 1,
+  },
+  adminBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.warning}20`,
+    paddingHorizontal: SPACING.xs,
+    paddingVertical: 2,
+    borderRadius: BORDER_RADIUS.sm,
+    marginLeft: SPACING.xs,
+  },
+  adminText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: COLORS.warning,
+    marginLeft: 2,
+  },
+  circleDescription: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
     marginBottom: SPACING.xs,
   },
   circleMeta: {
@@ -189,9 +234,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textSecondary,
   },
+  privacyIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   codeText: {
     fontSize: 11,
     color: COLORS.textLight,
+    marginLeft: 4,
   },
   separator: {
     height: SPACING.sm,

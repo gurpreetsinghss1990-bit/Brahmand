@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Base URLs
-BASE_URL = "https://brahmand-preview.preview.emergentagent.com/api"
+BASE_URL = "https://brahmand-vendors.preview.emergentagent.com/api"
 
 # Test configuration - Using specified phone numbers from review request (modified to avoid rate limiting)
 PHONE_USER1 = "+919999001111"

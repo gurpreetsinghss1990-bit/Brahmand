@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,9 +8,13 @@ import { Button } from '../../src/components/Button';
 import { createCircle } from '../../src/services/api';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 
+type PrivacyType = 'private' | 'invite_code';
+
 export default function CreateCircleScreen() {
   const router = useRouter();
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [privacy, setPrivacy] = useState<PrivacyType>('private');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [createdCircle, setCreatedCircle] = useState<any>(null);
@@ -25,7 +29,11 @@ export default function CreateCircleScreen() {
     setError('');
 
     try {
-      const response = await createCircle(name.trim());
+      const response = await createCircle({
+        name: name.trim(),
+        description: description.trim() || undefined,
+        privacy
+      });
       setCreatedCircle(response.data);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create circle');
@@ -33,6 +41,25 @@ export default function CreateCircleScreen() {
       setLoading(false);
     }
   };
+
+  const PrivacyOption = ({ value, title, subtitle, icon }: { value: PrivacyType; title: string; subtitle: string; icon: string }) => (
+    <TouchableOpacity
+      style={[styles.privacyOption, privacy === value && styles.privacyOptionSelected]}
+      onPress={() => setPrivacy(value)}
+      activeOpacity={0.7}
+    >
+      <View style={[styles.privacyIcon, privacy === value && styles.privacyIconSelected]}>
+        <Ionicons name={icon as any} size={24} color={privacy === value ? COLORS.textWhite : COLORS.textSecondary} />
+      </View>
+      <View style={styles.privacyContent}>
+        <Text style={[styles.privacyTitle, privacy === value && styles.privacyTitleSelected]}>{title}</Text>
+        <Text style={styles.privacySubtitle}>{subtitle}</Text>
+      </View>
+      {privacy === value && (
+        <Ionicons name="checkmark-circle" size={24} color={COLORS.primary} />
+      )}
+    </TouchableOpacity>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -49,7 +76,7 @@ export default function CreateCircleScreen() {
           <View style={{ width: 24 }} />
         </View>
 
-        <View style={styles.content}>
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
           {!createdCircle ? (
             <>
               <View style={styles.iconContainer}>
@@ -61,7 +88,7 @@ export default function CreateCircleScreen() {
               </Text>
 
               <Input
-                label="Circle Name"
+                label="Circle Name *"
                 placeholder="e.g., Family Circle, Temple Friends"
                 value={name}
                 onChangeText={(text) => {
@@ -69,6 +96,31 @@ export default function CreateCircleScreen() {
                   setError('');
                 }}
                 error={error}
+              />
+
+              <Input
+                label="Description (Optional)"
+                placeholder="What is this circle about?"
+                value={description}
+                onChangeText={setDescription}
+                multiline
+                numberOfLines={3}
+              />
+
+              <Text style={styles.sectionTitle}>Privacy Settings</Text>
+
+              <PrivacyOption
+                value="private"
+                title="Private"
+                subtitle="Members need admin approval to join"
+                icon="lock-closed"
+              />
+
+              <PrivacyOption
+                value="invite_code"
+                title="Invite Code"
+                subtitle="Anyone with the code can join directly"
+                icon="key"
               />
 
               <Button
@@ -94,11 +146,26 @@ export default function CreateCircleScreen() {
               <Text style={styles.successTitle}>Circle Created!</Text>
               <Text style={styles.circleName}>{createdCircle.name}</Text>
 
+              {createdCircle.description && (
+                <Text style={styles.circleDescription}>{createdCircle.description}</Text>
+              )}
+
               <View style={styles.codeCard}>
                 <Text style={styles.codeLabel}>Circle Code</Text>
                 <Text style={styles.codeText}>{createdCircle.code}</Text>
                 <Text style={styles.codeHint}>
                   Share this code with others so they can join your circle
+                </Text>
+              </View>
+
+              <View style={styles.privacyBadge}>
+                <Ionicons 
+                  name={createdCircle.privacy === 'private' ? 'lock-closed' : 'key'} 
+                  size={16} 
+                  color={COLORS.textSecondary} 
+                />
+                <Text style={styles.privacyBadgeText}>
+                  {createdCircle.privacy === 'private' ? 'Private - Approval required' : 'Open - Code join allowed'}
                 </Text>
               </View>
 
@@ -121,7 +188,7 @@ export default function CreateCircleScreen() {
               />
             </View>
           )}
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -149,9 +216,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.text,
   },
-  content: {
+  scrollView: {
     flex: 1,
+  },
+  content: {
     padding: SPACING.lg,
+    paddingBottom: SPACING.xxl,
   },
   iconContainer: {
     alignItems: 'center',
@@ -163,6 +233,55 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: SPACING.xl,
     lineHeight: 20,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginTop: SPACING.lg,
+    marginBottom: SPACING.md,
+  },
+  privacyOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  privacyOptionSelected: {
+    borderColor: COLORS.primary,
+    backgroundColor: `${COLORS.primary}10`,
+  },
+  privacyIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.md,
+  },
+  privacyIconSelected: {
+    backgroundColor: COLORS.primary,
+  },
+  privacyContent: {
+    flex: 1,
+  },
+  privacyTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  privacyTitleSelected: {
+    color: COLORS.primary,
+  },
+  privacySubtitle: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
   },
   button: {
     marginTop: SPACING.lg,
@@ -197,7 +316,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: COLORS.primary,
     fontWeight: '600',
-    marginBottom: SPACING.xl,
+    marginBottom: SPACING.xs,
+  },
+  circleDescription: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: SPACING.lg,
   },
   codeCard: {
     width: '100%',
@@ -205,7 +330,7 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.lg,
     alignItems: 'center',
-    marginBottom: SPACING.lg,
+    marginBottom: SPACING.md,
   },
   codeLabel: {
     fontSize: 12,
@@ -223,6 +348,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textLight,
     textAlign: 'center',
+  },
+  privacyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+    marginBottom: SPACING.lg,
+  },
+  privacyBadgeText: {
+    marginLeft: SPACING.xs,
+    fontSize: 13,
+    color: COLORS.textSecondary,
   },
   closeButton: {
     marginTop: SPACING.sm,

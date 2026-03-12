@@ -33,7 +33,7 @@ from services.push_notification_service import push_service
 from models.schemas import (
     OTPRequest, OTPVerify, UserCreate, UserUpdate, ProfileUpdate,
     LocationSetup, DualLocationSetup, MessageCreate, DirectMessageCreate,
-    CircleCreate, CircleJoin
+    CircleCreate, CircleJoin, CircleUpdate, CircleInvite, CirclePrivacy
 )
 from middleware.security import verify_token, create_jwt_token
 from middleware.rate_limiter import auth_rate_limit, messaging_rate_limit
@@ -1246,34 +1246,477 @@ async def update_privacy_settings(settings: dict, token_data: dict = Depends(ver
 
 @api_router.get("/circles")
 async def get_circles(token_data: dict = Depends(verify_token)):
+    """Get all circles the user is a member of"""
     db = await get_db()
-    user = await db.get_document('users', token_data["user_id"])
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
     circles = []
     for cid in user.get('circles', []):
         circle = await db.get_document('circles', cid)
         if circle:
-            circles.append(circle)
+            circles.append({
+                "id": circle['id'],
+                "name": circle['name'],
+                "description": circle.get('description', ''),
+                "code": circle['code'],
+                "privacy": circle.get('privacy', 'private'),
+                "creator_id": circle.get('creator_id', circle.get('admin_id')),
+                "admin_id": circle.get('admin_id'),
+                "member_count": len(circle.get('members', [])),
+                "is_admin": circle.get('admin_id') == user_id,
+                "created_at": circle.get('created_at')
+            })
     return circles
 
 
 @api_router.post("/circles")
 async def create_circle(data: CircleCreate, token_data: dict = Depends(verify_token)):
+    """Create a new circle (private group chat)"""
     db = await get_db()
     user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
     
+    # Generate unique invite code
     code = generate_circle_code(data.name)
+    while await db.find_one('circles', [('code', '==', code)]):
+        code = generate_circle_code(data.name)
+    
     circle_data = {
         "name": data.name,
+        "description": data.description or "",
         "code": code,
+        "privacy": data.privacy.value,
+        "creator_id": user_id,
         "admin_id": user_id,
-        "members": [user_id]
+        "members": [user_id],
+        "member_details": [{
+            "user_id": user_id,
+            "name": user['name'],
+            "sl_id": user.get('sl_id'),
+            "photo": user.get('photo'),
+            "joined_at": datetime.utcnow().isoformat()
+        }]
     }
     
     circle_id = await db.create_document('circles', circle_data)
     await db.array_union_update('users', user_id, 'circles', [circle_id])
     
-    circle_data['id'] = circle_id
-    return circle_data
+    logger.info(f"Circle created: {data.name} by user {user_id}")
+    
+    return {
+        "id": circle_id,
+        "name": circle_data['name'],
+        "description": circle_data['description'],
+        "code": circle_data['code'],
+        "privacy": circle_data['privacy'],
+        "creator_id": user_id,
+        "admin_id": user_id,
+        "member_count": 1,
+        "is_admin": True,
+        "created_at": datetime.utcnow().isoformat()
+    }
+
+
+@api_router.get("/circles/{circle_id}")
+async def get_circle(circle_id: str, token_data: dict = Depends(verify_token)):
+    """Get circle details"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    circle = await db.get_document('circles', circle_id)
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found")
+    
+    # Check if user is member
+    if user_id not in circle.get('members', []):
+        raise HTTPException(status_code=403, detail="Not a member of this circle")
+    
+    # Get member details
+    members_info = []
+    for member_id in circle.get('members', []):
+        member = await db.get_document('users', member_id)
+        if member:
+            members_info.append({
+                "user_id": member_id,
+                "name": member['name'],
+                "sl_id": member.get('sl_id'),
+                "photo": member.get('photo')
+            })
+    
+    return {
+        "id": circle['id'],
+        "name": circle['name'],
+        "description": circle.get('description', ''),
+        "code": circle['code'],
+        "privacy": circle.get('privacy', 'private'),
+        "creator_id": circle.get('creator_id', circle.get('admin_id')),
+        "admin_id": circle.get('admin_id'),
+        "members": members_info,
+        "member_count": len(circle.get('members', [])),
+        "is_admin": circle.get('admin_id') == user_id,
+        "created_at": circle.get('created_at')
+    }
+
+
+@api_router.put("/circles/{circle_id}")
+async def update_circle(circle_id: str, data: CircleUpdate, token_data: dict = Depends(verify_token)):
+    """Update circle details (admin only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    circle = await db.get_document('circles', circle_id)
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found")
+    
+    if circle.get('admin_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only admin can update circle")
+    
+    update_data = {}
+    if data.name is not None:
+        update_data['name'] = data.name
+    if data.description is not None:
+        update_data['description'] = data.description
+    if data.privacy is not None:
+        update_data['privacy'] = data.privacy.value
+    
+    if update_data:
+        await db.update_document('circles', circle_id, update_data)
+    
+    return {"message": "Circle updated successfully"}
+
+
+@api_router.post("/circles/join")
+async def join_circle(data: CircleJoin, token_data: dict = Depends(verify_token)):
+    """Join a circle using invite code"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    code = data.code.upper()
+    
+    circle = await db.find_one('circles', [('code', '==', code)])
+    if not circle:
+        raise HTTPException(status_code=404, detail="Invalid circle code")
+    
+    circle_id = circle['id']
+    
+    # Check if already member
+    if user_id in circle.get('members', []):
+        raise HTTPException(status_code=400, detail="Already a member of this circle")
+    
+    privacy = circle.get('privacy', 'private')
+    
+    if privacy == 'invite_code':
+        # Direct join for invite_code privacy
+        await db.array_union_update('circles', circle_id, 'members', [user_id])
+        await db.array_union_update('users', user_id, 'circles', [circle_id])
+        
+        logger.info(f"User {user_id} joined circle {circle_id} directly")
+        return {"message": f"Joined circle: {circle['name']}", "circle_id": circle_id, "status": "joined"}
+    
+    else:
+        # For private circles, create a join request
+        existing_request = await db.find_one('circle_requests', [
+            ('circle_id', '==', circle_id),
+            ('user_id', '==', user_id),
+            ('status', '==', 'pending')
+        ])
+        
+        if existing_request:
+            raise HTTPException(status_code=400, detail="Join request already pending")
+        
+        request_data = {
+            "circle_id": circle_id,
+            "user_id": user_id,
+            "user_name": user['name'],
+            "user_sl_id": user.get('sl_id'),
+            "user_photo": user.get('photo'),
+            "status": "pending"
+        }
+        await db.create_document('circle_requests', request_data)
+        
+        logger.info(f"User {user_id} requested to join circle {circle_id}")
+        return {"message": f"Join request sent to {circle['name']}", "circle": circle['name'], "status": "pending"}
+
+
+@api_router.get("/circles/{circle_id}/requests")
+async def get_circle_requests(circle_id: str, token_data: dict = Depends(verify_token)):
+    """Get pending join requests for a circle (admin only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    circle = await db.get_document('circles', circle_id)
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found")
+    
+    if circle.get('admin_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only admin can view requests")
+    
+    requests = await db.query_documents('circle_requests', filters=[
+        ('circle_id', '==', circle_id),
+        ('status', '==', 'pending')
+    ])
+    
+    return requests
+
+
+@api_router.post("/circles/{circle_id}/approve/{request_user_id}")
+async def approve_circle_request(circle_id: str, request_user_id: str, token_data: dict = Depends(verify_token)):
+    """Approve a join request (admin only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    circle = await db.get_document('circles', circle_id)
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found")
+    
+    if circle.get('admin_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only admin can approve requests")
+    
+    # Find the request
+    request = await db.find_one('circle_requests', [
+        ('circle_id', '==', circle_id),
+        ('user_id', '==', request_user_id),
+        ('status', '==', 'pending')
+    ])
+    
+    if not request:
+        raise HTTPException(status_code=404, detail="Join request not found")
+    
+    # Add member to circle
+    await db.array_union_update('circles', circle_id, 'members', [request_user_id])
+    await db.array_union_update('users', request_user_id, 'circles', [circle_id])
+    
+    # Update request status
+    await db.update_document('circle_requests', request['id'], {'status': 'approved'})
+    
+    logger.info(f"User {request_user_id} approved to join circle {circle_id}")
+    return {"message": f"User {request.get('user_name', request_user_id)} approved"}
+
+
+@api_router.post("/circles/{circle_id}/reject/{request_user_id}")
+async def reject_circle_request(circle_id: str, request_user_id: str, token_data: dict = Depends(verify_token)):
+    """Reject a join request (admin only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    circle = await db.get_document('circles', circle_id)
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found")
+    
+    if circle.get('admin_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only admin can reject requests")
+    
+    # Find the request
+    request = await db.find_one('circle_requests', [
+        ('circle_id', '==', circle_id),
+        ('user_id', '==', request_user_id),
+        ('status', '==', 'pending')
+    ])
+    
+    if not request:
+        raise HTTPException(status_code=404, detail="Join request not found")
+    
+    # Update request status
+    await db.update_document('circle_requests', request['id'], {'status': 'rejected'})
+    
+    logger.info(f"User {request_user_id} rejected from circle {circle_id}")
+    return {"message": "Request rejected"}
+
+
+@api_router.post("/circles/{circle_id}/invite")
+async def invite_to_circle(circle_id: str, data: CircleInvite, token_data: dict = Depends(verify_token)):
+    """Invite user to circle by SL-ID (admin only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    circle = await db.get_document('circles', circle_id)
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found")
+    
+    if circle.get('admin_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only admin can invite members")
+    
+    # Find user by SL-ID
+    target_user = await db.get_user_by_sl_id(data.sl_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    target_user_id = target_user['id']
+    
+    # Check if already member
+    if target_user_id in circle.get('members', []):
+        raise HTTPException(status_code=400, detail="User is already a member")
+    
+    # Add directly (invitation = direct add)
+    await db.array_union_update('circles', circle_id, 'members', [target_user_id])
+    await db.array_union_update('users', target_user_id, 'circles', [circle_id])
+    
+    logger.info(f"User {target_user_id} invited to circle {circle_id}")
+    return {"message": f"Invited {target_user['name']} to circle"}
+
+
+@api_router.post("/circles/{circle_id}/leave")
+async def leave_circle(circle_id: str, token_data: dict = Depends(verify_token)):
+    """Leave a circle"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    circle = await db.get_document('circles', circle_id)
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found")
+    
+    if user_id not in circle.get('members', []):
+        raise HTTPException(status_code=400, detail="Not a member of this circle")
+    
+    # Admin cannot leave - must transfer or delete
+    if circle.get('admin_id') == user_id:
+        raise HTTPException(status_code=400, detail="Admin cannot leave. Transfer admin rights or delete the circle.")
+    
+    # Remove from circle
+    await db.array_remove_update('circles', circle_id, 'members', [user_id])
+    await db.array_remove_update('users', user_id, 'circles', [circle_id])
+    
+    logger.info(f"User {user_id} left circle {circle_id}")
+    return {"message": "Left circle successfully"}
+
+
+@api_router.delete("/circles/{circle_id}")
+async def delete_circle(circle_id: str, token_data: dict = Depends(verify_token)):
+    """Delete a circle (admin only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    circle = await db.get_document('circles', circle_id)
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found")
+    
+    if circle.get('admin_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only admin can delete circle")
+    
+    # Remove circle from all members' circle lists
+    for member_id in circle.get('members', []):
+        try:
+            await db.array_remove_update('users', member_id, 'circles', [circle_id])
+        except:
+            pass
+    
+    # Delete circle
+    await db.delete_document('circles', circle_id)
+    
+    logger.info(f"Circle {circle_id} deleted by admin {user_id}")
+    return {"message": "Circle deleted successfully"}
+
+
+@api_router.post("/circles/{circle_id}/remove-member/{member_id}")
+async def remove_circle_member(circle_id: str, member_id: str, token_data: dict = Depends(verify_token)):
+    """Remove a member from circle (admin only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    circle = await db.get_document('circles', circle_id)
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found")
+    
+    if circle.get('admin_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only admin can remove members")
+    
+    if member_id == user_id:
+        raise HTTPException(status_code=400, detail="Admin cannot remove themselves")
+    
+    if member_id not in circle.get('members', []):
+        raise HTTPException(status_code=400, detail="User is not a member")
+    
+    # Remove member
+    await db.array_remove_update('circles', circle_id, 'members', [member_id])
+    await db.array_remove_update('users', member_id, 'circles', [circle_id])
+    
+    logger.info(f"User {member_id} removed from circle {circle_id}")
+    return {"message": "Member removed successfully"}
+
+
+# =================== CIRCLE MESSAGING ===================
+
+@api_router.post("/messages/circle/{circle_id}")
+async def send_circle_message(
+    circle_id: str, 
+    message: MessageCreate,
+    token_data: dict = Depends(verify_token), 
+    _: bool = Depends(messaging_rate_limit)
+):
+    """Send a message to a circle chat"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
+    circle = await db.get_document('circles', circle_id)
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found")
+    
+    if user_id not in circle.get('members', []):
+        raise HTTPException(status_code=403, detail="Not a member of this circle")
+    
+    # Content moderation
+    is_ok, reason = moderate_content(message.content)
+    if not is_ok:
+        raise HTTPException(status_code=400, detail=reason)
+    
+    chat_id = f"circle_{circle_id}"
+    
+    # Ensure chat exists
+    chat = await db.get_document('chats', chat_id)
+    if not chat:
+        await db.set_document('chats', chat_id, {
+            'type': 'circle',
+            'circle_id': circle_id,
+            'circle_name': circle['name']
+        })
+    
+    # Add message to subcollection
+    msg_data = {
+        'sender_id': user['id'],
+        'sender_name': user['name'],
+        'sender_photo': user.get('photo'),
+        'sender_sl_id': user.get('sl_id'),
+        'content': message.content,
+        'message_type': message.message_type.value,
+        'created_at': datetime.utcnow().isoformat()
+    }
+    
+    msg_id = await db.add_message_to_chat(chat_id, msg_data.copy())
+    
+    response_data = {
+        'id': msg_id,
+        'sender_id': user['id'],
+        'sender_name': user['name'],
+        'sender_photo': user.get('photo'),
+        'sender_sl_id': user.get('sl_id'),
+        'content': message.content,
+        'message_type': message.message_type.value,
+        'created_at': datetime.utcnow().isoformat()
+    }
+    
+    # Emit via Socket.IO
+    await sio.emit('new_message', response_data, room=chat_id)
+    
+    return response_data
+
+
+@api_router.get("/messages/circle/{circle_id}")
+async def get_circle_messages(circle_id: str, limit: int = 50, token_data: dict = Depends(verify_token)):
+    """Get messages from a circle chat"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    circle = await db.get_document('circles', circle_id)
+    if not circle:
+        raise HTTPException(status_code=404, detail="Circle not found")
+    
+    if user_id not in circle.get('members', []):
+        raise HTTPException(status_code=403, detail="Not a member of this circle")
+    
+    chat_id = f"circle_{circle_id}"
+    return await db.get_chat_messages(chat_id, limit)
 
 
 # =================== TEMPLES ===================

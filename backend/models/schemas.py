@@ -174,8 +174,21 @@ class CommunityStats(BaseModel):
 
 # ================= CIRCLE MODELS =================
 
+class CirclePrivacy(str, Enum):
+    PRIVATE = "private"  # Join requests require admin approval
+    INVITE_CODE = "invite_code"  # Anyone with code can join directly
+
+
 class CircleCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=50)
+    description: Optional[str] = Field(None, max_length=500)
+    privacy: CirclePrivacy = CirclePrivacy.PRIVATE
+
+
+class CircleUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=50)
+    description: Optional[str] = Field(None, max_length=500)
+    privacy: Optional[CirclePrivacy] = None
 
 
 class CircleJoin(BaseModel):
@@ -183,16 +196,20 @@ class CircleJoin(BaseModel):
 
 
 class CircleInvite(BaseModel):
-    circle_id: str
     sl_id: str
 
 
 class CircleResponse(BaseModel):
     id: str
     name: str
+    description: Optional[str] = None
     code: str
+    privacy: str
+    creator_id: str
     admin_id: str
+    members: List[str] = []
     member_count: int
+    is_admin: bool = False
     created_at: datetime
 
 

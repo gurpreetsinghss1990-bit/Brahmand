@@ -37,9 +37,32 @@ export interface Subgroup {
 export interface Circle {
   id: string;
   name: string;
+  description?: string;
   code: string;
+  privacy: 'private' | 'invite_code';
+  creator_id: string;
   admin_id: string;
+  members?: CircleMember[];
   member_count: number;
+  is_admin: boolean;
+  created_at: string;
+}
+
+export interface CircleMember {
+  user_id: string;
+  name: string;
+  sl_id?: string;
+  photo?: string;
+}
+
+export interface CircleJoinRequest {
+  id: string;
+  circle_id: string;
+  user_id: string;
+  user_name: string;
+  user_sl_id?: string;
+  user_photo?: string;
+  status: 'pending' | 'approved' | 'rejected';
   created_at: string;
 }
 

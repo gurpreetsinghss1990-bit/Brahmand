@@ -72,11 +72,17 @@ export const agreeToRules = (communityId: string, subgroupType: string) =>
   api.post(`/communities/${communityId}/agree-rules`, { subgroup_type: subgroupType });
 
 // Circle APIs
-export const createCircle = (name: string) => 
-  api.post('/circles', { name });
+export const createCircle = (data: { name: string; description?: string; privacy?: 'private' | 'invite_code' }) => 
+  api.post('/circles', data);
 
 export const getCircles = () => 
   api.get('/circles');
+
+export const getCircle = (circleId: string) => 
+  api.get(`/circles/${circleId}`);
+
+export const updateCircle = (circleId: string, data: { name?: string; description?: string; privacy?: 'private' | 'invite_code' }) => 
+  api.put(`/circles/${circleId}`, data);
 
 export const joinCircle = (code: string) => 
   api.post('/circles/join', { code });
@@ -85,10 +91,22 @@ export const getCircleRequests = (circleId: string) =>
   api.get(`/circles/${circleId}/requests`);
 
 export const approveCircleRequest = (circleId: string, userId: string) => 
-  api.post(`/circles/${circleId}/approve`, { user_id: userId });
+  api.post(`/circles/${circleId}/approve/${userId}`);
+
+export const rejectCircleRequest = (circleId: string, userId: string) => 
+  api.post(`/circles/${circleId}/reject/${userId}`);
 
 export const inviteToCircle = (circleId: string, slId: string) => 
-  api.post(`/circles/${circleId}/invite`, { circle_id: circleId, sl_id: slId });
+  api.post(`/circles/${circleId}/invite`, { sl_id: slId });
+
+export const leaveCircle = (circleId: string) => 
+  api.post(`/circles/${circleId}/leave`);
+
+export const deleteCircle = (circleId: string) => 
+  api.delete(`/circles/${circleId}`);
+
+export const removeCircleMember = (circleId: string, memberId: string) => 
+  api.post(`/circles/${circleId}/remove-member/${memberId}`);
 
 // Message APIs
 export const sendCommunityMessage = (communityId: string, subgroupType: string, content: string, messageType: string = 'text') => 
