@@ -451,3 +451,22 @@ class VendorResponse(BaseModel):
 
 class CulturalCommunityUpdate(BaseModel):
     cultural_community: str = Field(..., min_length=2, max_length=100)
+
+
+# ================= SOS MODELS =================
+
+class SOSCreate(BaseModel):
+    latitude: float
+    longitude: float
+    area: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+
+
+# ================= ASTROLOGY MODELS =================
+
+class AstrologyProfile(BaseModel):
+    date_of_birth: str  # YYYY-MM-DD
+    time_of_birth: Optional[str] = None  # HH:MM
+    place_of_birth: Optional[str] = None
+    rashi: Optional[str] = None

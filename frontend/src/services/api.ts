@@ -346,14 +346,6 @@ export const getUserCulturalCommunity = () =>
 export const updateUserCulturalCommunity = (cultural_community: string) => 
   api.put('/user/cultural-community', { cultural_community });
 
-// =================== CIRCLE MESSAGE APIS ===================
-
-export const sendCircleMessage = (circleId: string, content: string) => 
-  api.post(`/messages/circle/${circleId}`, { content, message_type: 'text' });
-
-export const getCircleMessages = (circleId: string, limit: number = 50) => 
-  api.get(`/messages/circle/${circleId}`, { params: { limit } });
-
 // =================== UTILITY APIS ===================
 
 export const getWisdom = () => 
@@ -361,5 +353,30 @@ export const getWisdom = () =>
 
 export const getPanchang = () => 
   api.get('/panchang/today');
+
+// =================== SOS EMERGENCY APIS ===================
+
+export const createSOSAlert = (data: {
+  latitude: number;
+  longitude: number;
+  area?: string;
+  city?: string;
+  state?: string;
+}) => api.post('/sos', data);
+
+export const getActiveSOSAlerts = (params?: {
+  lat?: number;
+  lng?: number;
+  radius?: number;
+}) => api.get('/sos/nearby', { params });
+
+export const getMySOSAlert = () => 
+  api.get('/sos/my');
+
+export const resolveSOSAlert = (sosId: string, status: 'resolved' | 'cancelled') => 
+  api.post(`/sos/${sosId}/resolve`, { status });
+
+export const respondToSOS = (sosId: string, response: 'coming' | 'called') => 
+  api.post(`/sos/${sosId}/respond`, { response });
 
 export default api;

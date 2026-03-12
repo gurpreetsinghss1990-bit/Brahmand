@@ -36,7 +36,8 @@ from models.schemas import (
     LocationSetup, DualLocationSetup, MessageCreate, DirectMessageCreate,
     CircleCreate, CircleJoin, CircleUpdate, CircleInvite, CirclePrivacy,
     HelpRequestCreate, HelpStatus, HelpUrgency, CommunityLevel,
-    VendorCreate, VendorUpdate, CulturalCommunityUpdate
+    VendorCreate, VendorUpdate, CulturalCommunityUpdate,
+    SOSCreate, AstrologyProfile
 )
 from middleware.security import verify_token, create_jwt_token
 from middleware.rate_limiter import auth_rate_limit, messaging_rate_limit
@@ -2699,6 +2700,525 @@ async def update_cultural_community(data: CulturalCommunityUpdate, token_data: d
         "cultural_community": data.cultural_community,
         "change_count": new_count,
         "is_locked": new_count >= 2
+    }
+
+
+# =================== SOS EMERGENCY SYSTEM ===================
+
+
+@api_router.post("/sos")
+async def create_sos_alert(data: SOSCreate, token_data: dict = Depends(verify_token)):
+    """Create an SOS emergency alert"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
+    # Check if user already has an active SOS
+    existing = await db.find_one('sos_alerts', [
+        ('user_id', '==', user_id),
+        ('status', '==', 'active')
+    ])
+    if existing:
+        raise HTTPException(status_code=400, detail="You already have an active SOS alert")
+    
+    # Get location info from user if not provided
+    area = data.area or user.get('location_area', {}).get('area', 'Unknown')
+    city = data.city or user.get('location_area', {}).get('city', 'Unknown')
+    state = data.state or user.get('location_area', {}).get('state', 'Unknown')
+    
+    # Create SOS alert with 30 minute expiry
+    from datetime import timedelta
+    expires_at = datetime.utcnow() + timedelta(minutes=30)
+    
+    sos_data = {
+        "user_id": user_id,
+        "user_name": user.get('name'),
+        "user_photo": user.get('photo'),
+        "user_sl_id": user.get('sl_id'),
+        "phone_number": user.get('phone'),
+        "latitude": data.latitude,
+        "longitude": data.longitude,
+        "area": area,
+        "city": city,
+        "state": state,
+        "status": "active",
+        "responders": [],
+        "expires_at": expires_at.isoformat()
+    }
+    
+    sos_id = await db.create_document('sos_alerts', sos_data)
+    sos_data['id'] = sos_id
+    
+    # Broadcast to community chat
+    community_ids = user.get('communities', [])
+    for comm_id in community_ids[:3]:  # Broadcast to first 3 communities
+        try:
+            alert_message = {
+                'sender_id': 'system',
+                'sender_name': 'Emergency Alert',
+                'content': f"🚨 EMERGENCY SOS\n\nUser: {user.get('name')}\nLocation: {area}, {city}\n\nTap to help or call {user.get('phone')}",
+                'message_type': 'sos_alert',
+                'sos_id': sos_id,
+                'sos_data': sos_data,
+                'created_at': datetime.utcnow().isoformat()
+            }
+            chat_id = f"community_{comm_id}_chat"
+            await db.add_message_to_chat(chat_id, alert_message)
+            await sio.emit('new_message', alert_message, room=chat_id)
+        except Exception as e:
+            logger.error(f"Failed to broadcast SOS to community {comm_id}: {e}")
+    
+    # Emit SOS alert via socket to nearby users
+    await sio.emit('sos_alert', sos_data)
+    
+    logger.info(f"SOS alert created by {user_id} at {area}, {city}")
+    return sos_data
+
+
+@api_router.get("/sos/nearby")
+async def get_nearby_sos_alerts(
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    radius: float = 10,  # km
+    token_data: dict = Depends(verify_token)
+):
+    """Get active SOS alerts nearby"""
+    db = await get_db()
+    
+    # Get all active SOS alerts
+    alerts = await db.query_documents('sos_alerts', filters=[
+        ('status', '==', 'active')
+    ])
+    
+    # Filter by distance if coordinates provided
+    if lat and lng:
+        import math
+        nearby_alerts = []
+        for alert in alerts:
+            if alert.get('latitude') and alert.get('longitude'):
+                # Haversine formula
+                R = 6371  # Earth radius in km
+                lat1, lon1 = math.radians(lat), math.radians(lng)
+                lat2, lon2 = math.radians(alert['latitude']), math.radians(alert['longitude'])
+                dlat, dlon = lat2 - lat1, lon2 - lon1
+                a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+                distance = R * 2 * math.asin(math.sqrt(a))
+                if distance <= radius:
+                    alert['distance'] = distance
+                    nearby_alerts.append(alert)
+        alerts = sorted(nearby_alerts, key=lambda x: x.get('distance', 0))
+    
+    return alerts
+
+
+@api_router.get("/sos/my")
+async def get_my_sos_alert(token_data: dict = Depends(verify_token)):
+    """Get current user's active SOS alert"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    alert = await db.find_one('sos_alerts', [
+        ('user_id', '==', user_id),
+        ('status', '==', 'active')
+    ])
+    
+    return alert
+
+
+@api_router.post("/sos/{sos_id}/resolve")
+async def resolve_sos_alert(sos_id: str, status: str = Body(..., embed=True), token_data: dict = Depends(verify_token)):
+    """Resolve or cancel an SOS alert (creator only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    alert = await db.get_document('sos_alerts', sos_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="SOS alert not found")
+    
+    if alert.get('user_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only the creator can resolve this alert")
+    
+    if status not in ['resolved', 'cancelled']:
+        raise HTTPException(status_code=400, detail="Status must be 'resolved' or 'cancelled'")
+    
+    await db.update_document('sos_alerts', sos_id, {
+        'status': status,
+        'resolved_at': datetime.utcnow().isoformat()
+    })
+    
+    # Notify responders
+    await sio.emit('sos_resolved', {'sos_id': sos_id, 'status': status})
+    
+    logger.info(f"SOS alert {sos_id} marked as {status} by {user_id}")
+    return {"message": f"SOS alert {status}"}
+
+
+@api_router.post("/sos/{sos_id}/respond")
+async def respond_to_sos(sos_id: str, response: str = Body(..., embed=True), token_data: dict = Depends(verify_token)):
+    """Respond to an SOS alert (coming/called)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
+    alert = await db.get_document('sos_alerts', sos_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="SOS alert not found")
+    
+    if alert.get('status') != 'active':
+        raise HTTPException(status_code=400, detail="SOS alert is no longer active")
+    
+    responder_data = {
+        "user_id": user_id,
+        "user_name": user.get('name'),
+        "response": response,
+        "responded_at": datetime.utcnow().isoformat()
+    }
+    
+    await db.array_union_update('sos_alerts', sos_id, 'responders', [responder_data])
+    
+    # Notify SOS creator
+    await sio.emit('sos_response', {
+        'sos_id': sos_id,
+        'responder': responder_data
+    }, room=f"user_{alert.get('user_id')}")
+    
+    logger.info(f"User {user_id} responded to SOS {sos_id}: {response}")
+    return {"message": f"Response recorded: {response}"}
+
+
+# =================== SPIRITUAL ENGINE ===================
+
+# Festival Database
+FESTIVALS = [
+    {"name": "Makar Sankranti", "month": 1, "day": 14, "tithi": "Magha Shukla", "importance": "major"},
+    {"name": "Vasant Panchami", "month": 2, "day": 14, "tithi": "Magha Shukla Panchami", "importance": "major"},
+    {"name": "Maha Shivaratri", "month": 3, "day": 8, "tithi": "Phalguna Krishna Chaturdashi", "importance": "major"},
+    {"name": "Holi", "month": 3, "day": 25, "tithi": "Phalguna Purnima", "importance": "major"},
+    {"name": "Ram Navami", "month": 4, "day": 17, "tithi": "Chaitra Shukla Navami", "importance": "major"},
+    {"name": "Hanuman Jayanti", "month": 4, "day": 23, "tithi": "Chaitra Purnima", "importance": "major"},
+    {"name": "Akshaya Tritiya", "month": 5, "day": 10, "tithi": "Vaishakha Shukla Tritiya", "importance": "major"},
+    {"name": "Buddha Purnima", "month": 5, "day": 23, "tithi": "Vaishakha Purnima", "importance": "major"},
+    {"name": "Guru Purnima", "month": 7, "day": 21, "tithi": "Ashadha Purnima", "importance": "major"},
+    {"name": "Raksha Bandhan", "month": 8, "day": 19, "tithi": "Shravana Purnima", "importance": "major"},
+    {"name": "Janmashtami", "month": 8, "day": 26, "tithi": "Bhadrapada Krishna Ashtami", "importance": "major"},
+    {"name": "Ganesh Chaturthi", "month": 9, "day": 7, "tithi": "Bhadrapada Shukla Chaturthi", "importance": "major"},
+    {"name": "Navratri Begins", "month": 10, "day": 3, "tithi": "Ashwin Shukla Pratipada", "importance": "major"},
+    {"name": "Dussehra", "month": 10, "day": 12, "tithi": "Ashwin Shukla Dashami", "importance": "major"},
+    {"name": "Karwa Chauth", "month": 10, "day": 20, "tithi": "Kartik Krishna Chaturthi", "importance": "medium"},
+    {"name": "Diwali", "month": 11, "day": 1, "tithi": "Kartik Amavasya", "importance": "major"},
+    {"name": "Govardhan Puja", "month": 11, "day": 2, "tithi": "Kartik Shukla Pratipada", "importance": "medium"},
+    {"name": "Bhai Dooj", "month": 11, "day": 3, "tithi": "Kartik Shukla Dwitiya", "importance": "medium"},
+    {"name": "Dev Uthani Ekadashi", "month": 11, "day": 12, "tithi": "Kartik Shukla Ekadashi", "importance": "medium"},
+    {"name": "Tulsi Vivah", "month": 11, "day": 15, "tithi": "Kartik Shukla Dwadashi", "importance": "medium"},
+]
+
+# Rashis (Zodiac Signs) for horoscope
+RASHIS = {
+    "Mesh": {"english": "Aries", "element": "Fire", "ruling_planet": "Mars"},
+    "Vrishabh": {"english": "Taurus", "element": "Earth", "ruling_planet": "Venus"},
+    "Mithun": {"english": "Gemini", "element": "Air", "ruling_planet": "Mercury"},
+    "Kark": {"english": "Cancer", "element": "Water", "ruling_planet": "Moon"},
+    "Simha": {"english": "Leo", "element": "Fire", "ruling_planet": "Sun"},
+    "Kanya": {"english": "Virgo", "element": "Earth", "ruling_planet": "Mercury"},
+    "Tula": {"english": "Libra", "element": "Air", "ruling_planet": "Venus"},
+    "Vrishchik": {"english": "Scorpio", "element": "Water", "ruling_planet": "Mars"},
+    "Dhanu": {"english": "Sagittarius", "element": "Fire", "ruling_planet": "Jupiter"},
+    "Makar": {"english": "Capricorn", "element": "Earth", "ruling_planet": "Saturn"},
+    "Kumbh": {"english": "Aquarius", "element": "Air", "ruling_planet": "Saturn"},
+    "Meen": {"english": "Pisces", "element": "Water", "ruling_planet": "Jupiter"},
+}
+
+# Daily Horoscope Templates
+HOROSCOPE_TEMPLATES = {
+    "Mesh": ["Today brings new opportunities for leadership.", "Your energy levels are high - use them wisely.", "A good day for starting new ventures."],
+    "Vrishabh": ["Focus on financial matters today.", "Stability in relationships is indicated.", "A peaceful day awaits you."],
+    "Mithun": ["Communication skills will be at their best.", "Good day for learning and sharing knowledge.", "Social connections bring joy."],
+    "Kark": ["Family matters take priority today.", "Your intuition is strong - trust it.", "Emotional balance is key."],
+    "Simha": ["Your creativity shines today.", "Recognition for your efforts is likely.", "Take center stage with confidence."],
+    "Kanya": ["Attention to detail brings success.", "Health matters need focus.", "Organization leads to productivity."],
+    "Tula": ["Relationships are highlighted today.", "Balance work and personal life.", "Artistic pursuits bring satisfaction."],
+    "Vrishchik": ["Transformation is possible today.", "Deep insights emerge.", "Trust your inner strength."],
+    "Dhanu": ["Adventure and learning beckon.", "Optimism attracts good fortune.", "Travel plans may materialize."],
+    "Makar": ["Career progress is indicated.", "Hard work pays off.", "Discipline brings rewards."],
+    "Kumbh": ["Innovation leads the way.", "Friendships bring unexpected benefits.", "Think outside the box."],
+    "Meen": ["Spiritual growth is emphasized.", "Compassion guides your actions.", "Creative inspiration flows."],
+}
+
+
+def calculate_panchang(date: datetime, lat: float = 28.6139, lng: float = 77.2090):
+    """Calculate Panchang for given date and location"""
+    import math
+    
+    # Calculate day of year
+    day_of_year = date.timetuple().tm_yday
+    
+    # Tithi calculation (simplified - actual requires astronomical calculations)
+    # Moon's position relative to Sun determines tithi
+    lunar_day = ((day_of_year * 12.369) % 30) + 1
+    
+    tithis = [
+        "Pratipada", "Dwitiya", "Tritiya", "Chaturthi", "Panchami",
+        "Shashthi", "Saptami", "Ashtami", "Navami", "Dashami",
+        "Ekadashi", "Dwadashi", "Trayodashi", "Chaturdashi", "Purnima/Amavasya"
+    ]
+    tithi_index = int(lunar_day % 15)
+    paksha = "Shukla" if lunar_day <= 15 else "Krishna"
+    tithi = f"{paksha} {tithis[tithi_index]}"
+    
+    # Nakshatra calculation (simplified)
+    nakshatras = [
+        "Ashwini", "Bharani", "Krittika", "Rohini", "Mrigashira",
+        "Ardra", "Punarvasu", "Pushya", "Ashlesha", "Magha",
+        "Purva Phalguni", "Uttara Phalguni", "Hasta", "Chitra", "Swati",
+        "Vishakha", "Anuradha", "Jyeshtha", "Mula", "Purva Ashadha",
+        "Uttara Ashadha", "Shravana", "Dhanishta", "Shatabhisha",
+        "Purva Bhadrapada", "Uttara Bhadrapada", "Revati"
+    ]
+    nakshatra_index = int((day_of_year * 13.333) % 27)
+    nakshatra = nakshatras[nakshatra_index]
+    
+    # Yoga calculation
+    yogas = [
+        "Vishkumbha", "Priti", "Ayushman", "Saubhagya", "Shobhana",
+        "Atiganda", "Sukarma", "Dhriti", "Shula", "Ganda",
+        "Vriddhi", "Dhruva", "Vyaghata", "Harshana", "Vajra",
+        "Siddhi", "Vyatipata", "Variyan", "Parigha", "Shiva",
+        "Siddha", "Sadhya", "Shubha", "Shukla", "Brahma",
+        "Indra", "Vaidhriti"
+    ]
+    yoga_index = int((day_of_year * 13.333 + lunar_day) % 27)
+    yoga = yogas[yoga_index]
+    
+    # Karana calculation
+    karanas = ["Bava", "Balava", "Kaulava", "Taitila", "Gara", "Vanija", "Vishti"]
+    karana_index = int((lunar_day * 2) % 7)
+    karana = karanas[karana_index]
+    
+    # Sunrise/Sunset (simplified - actual requires complex calculations)
+    # Using approximate values for India
+    sunrise_hour = 6 + (day_of_year - 80) * 0.02
+    sunset_hour = 18 + (day_of_year - 80) * 0.02
+    sunrise = f"{int(sunrise_hour)}:{int((sunrise_hour % 1) * 60):02d} AM"
+    sunset = f"{int(sunset_hour - 12)}:{int((sunset_hour % 1) * 60):02d} PM"
+    
+    # Rahu Kaal (based on weekday)
+    weekday = date.weekday()
+    rahu_kaal_times = [
+        "7:30 AM - 9:00 AM",  # Monday
+        "3:00 PM - 4:30 PM",  # Tuesday
+        "12:00 PM - 1:30 PM", # Wednesday
+        "1:30 PM - 3:00 PM",  # Thursday
+        "10:30 AM - 12:00 PM",# Friday
+        "9:00 AM - 10:30 AM", # Saturday
+        "4:30 PM - 6:00 PM",  # Sunday
+    ]
+    rahu_kaal = rahu_kaal_times[weekday]
+    
+    # Abhijit Muhurat (approximately noon)
+    abhijit = "11:45 AM - 12:30 PM"
+    
+    # Moon Rashi
+    moon_rashis = list(RASHIS.keys())
+    moon_rashi_index = int((day_of_year * 2.5) % 12)
+    moon_rashi = moon_rashis[moon_rashi_index]
+    
+    return {
+        "date": date.strftime("%Y-%m-%d"),
+        "tithi": tithi,
+        "nakshatra": nakshatra,
+        "yoga": yoga,
+        "karana": karana,
+        "rahu_kaal": rahu_kaal,
+        "abhijit_muhurat": abhijit,
+        "sunrise": sunrise,
+        "sunset": sunset,
+        "moon_rashi": moon_rashi,
+        "paksha": paksha
+    }
+
+
+def get_daily_horoscope(rashi: str, date: datetime):
+    """Get daily horoscope for a rashi"""
+    import random
+    
+    # Seed with date and rashi for consistent daily horoscope
+    seed = int(date.strftime("%Y%m%d")) + hash(rashi)
+    random.seed(seed)
+    
+    templates = HOROSCOPE_TEMPLATES.get(rashi, HOROSCOPE_TEMPLATES["Mesh"])
+    prediction = random.choice(templates)
+    
+    # Add lucky elements
+    lucky_numbers = random.sample(range(1, 10), 3)
+    lucky_colors = ["Red", "Blue", "Green", "Yellow", "White", "Orange", "Purple"]
+    lucky_color = random.choice(lucky_colors)
+    
+    return {
+        "rashi": rashi,
+        "rashi_english": RASHIS.get(rashi, {}).get("english", rashi),
+        "prediction": prediction,
+        "lucky_numbers": lucky_numbers,
+        "lucky_color": lucky_color,
+        "element": RASHIS.get(rashi, {}).get("element", "Unknown"),
+        "ruling_planet": RASHIS.get(rashi, {}).get("ruling_planet", "Unknown")
+    }
+
+
+@api_router.get("/spiritual/panchang")
+async def get_detailed_panchang(
+    lat: float = 28.6139,
+    lng: float = 77.2090,
+    date_str: Optional[str] = None
+):
+    """Get detailed Panchang for a date and location"""
+    if date_str:
+        try:
+            date = datetime.strptime(date_str, "%Y-%m-%d")
+        except:
+            date = datetime.utcnow()
+    else:
+        date = datetime.utcnow()
+    
+    panchang = calculate_panchang(date, lat, lng)
+    return panchang
+
+
+@api_router.get("/spiritual/festivals")
+async def get_upcoming_festivals(limit: int = 5):
+    """Get upcoming festivals"""
+    today = datetime.utcnow()
+    current_month = today.month
+    current_day = today.day
+    
+    upcoming = []
+    for festival in FESTIVALS:
+        # Check if festival is upcoming
+        if (festival["month"] > current_month or 
+            (festival["month"] == current_month and festival["day"] >= current_day)):
+            festival_date = datetime(today.year, festival["month"], festival["day"])
+            days_until = (festival_date - today).days
+            upcoming.append({
+                **festival,
+                "date": festival_date.strftime("%Y-%m-%d"),
+                "days_until": days_until
+            })
+    
+    # If we're late in the year, add next year's festivals
+    if len(upcoming) < limit:
+        for festival in FESTIVALS:
+            if festival["month"] < current_month:
+                festival_date = datetime(today.year + 1, festival["month"], festival["day"])
+                days_until = (festival_date - today).days
+                upcoming.append({
+                    **festival,
+                    "date": festival_date.strftime("%Y-%m-%d"),
+                    "days_until": days_until
+                })
+                if len(upcoming) >= limit:
+                    break
+    
+    return sorted(upcoming, key=lambda x: x["days_until"])[:limit]
+
+
+@api_router.get("/spiritual/horoscope/{rashi}")
+async def get_horoscope(rashi: str):
+    """Get daily horoscope for a rashi"""
+    if rashi not in RASHIS:
+        raise HTTPException(status_code=400, detail=f"Invalid rashi. Valid options: {list(RASHIS.keys())}")
+    
+    today = datetime.utcnow()
+    horoscope = get_daily_horoscope(rashi, today)
+    return horoscope
+
+
+@api_router.get("/spiritual/horoscope")
+async def get_user_horoscope(token_data: dict = Depends(verify_token)):
+    """Get daily horoscope for authenticated user based on their birth details"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
+    user_rashi = user.get('rashi')
+    if not user_rashi:
+        return {
+            "message": "Please set your astrology profile to get personalized horoscope",
+            "has_profile": False
+        }
+    
+    today = datetime.utcnow()
+    horoscope = get_daily_horoscope(user_rashi, today)
+    horoscope["has_profile"] = True
+    return horoscope
+
+
+@api_router.get("/spiritual/rashis")
+async def get_all_rashis():
+    """Get all rashis (zodiac signs)"""
+    return RASHIS
+
+
+@api_router.put("/user/astrology-profile")
+async def update_astrology_profile(data: AstrologyProfile, token_data: dict = Depends(verify_token)):
+    """Update user's astrology profile"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    update_data = {
+        'date_of_birth': data.date_of_birth,
+        'time_of_birth': data.time_of_birth,
+        'place_of_birth': data.place_of_birth,
+    }
+    
+    # If rashi provided, use it; otherwise calculate from DOB
+    if data.rashi and data.rashi in RASHIS:
+        update_data['rashi'] = data.rashi
+    else:
+        # Simple calculation based on birth month (for demonstration)
+        try:
+            dob = datetime.strptime(data.date_of_birth, "%Y-%m-%d")
+            month = dob.month
+            day = dob.day
+            
+            # Approximate sun sign based on date
+            zodiac_dates = [
+                (1, 20, "Makar"), (2, 19, "Kumbh"), (3, 21, "Meen"),
+                (4, 20, "Mesh"), (5, 21, "Vrishabh"), (6, 21, "Mithun"),
+                (7, 23, "Kark"), (8, 23, "Simha"), (9, 23, "Kanya"),
+                (10, 23, "Tula"), (11, 22, "Vrishchik"), (12, 22, "Dhanu")
+            ]
+            
+            rashi = "Makar"  # Default
+            for i, (m, d, r) in enumerate(zodiac_dates):
+                if month == m and day < d:
+                    rashi = zodiac_dates[i-1][2] if i > 0 else "Dhanu"
+                    break
+                elif month == m:
+                    rashi = r
+                    break
+            
+            update_data['rashi'] = rashi
+        except:
+            pass
+    
+    await db.update_document('users', user_id, update_data)
+    
+    logger.info(f"User {user_id} updated astrology profile")
+    return {"message": "Astrology profile updated", **update_data}
+
+
+@api_router.get("/user/astrology-profile")
+async def get_astrology_profile(token_data: dict = Depends(verify_token)):
+    """Get user's astrology profile"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
+    return {
+        "date_of_birth": user.get('date_of_birth'),
+        "time_of_birth": user.get('time_of_birth'),
+        "place_of_birth": user.get('place_of_birth'),
+        "rashi": user.get('rashi'),
+        "rashi_english": RASHIS.get(user.get('rashi'), {}).get("english") if user.get('rashi') else None
     }
 
 
