@@ -2888,28 +2888,28 @@ async def respond_to_sos(sos_id: str, response: str = Body(..., embed=True), tok
 
 # =================== SPIRITUAL ENGINE ===================
 
-# Festival Database
+# Festival Database - 2026 dates (approximate based on Hindu lunar calendar)
 FESTIVALS = [
     {"name": "Makar Sankranti", "month": 1, "day": 14, "tithi": "Magha Shukla", "importance": "major"},
-    {"name": "Vasant Panchami", "month": 2, "day": 14, "tithi": "Magha Shukla Panchami", "importance": "major"},
-    {"name": "Maha Shivaratri", "month": 3, "day": 8, "tithi": "Phalguna Krishna Chaturdashi", "importance": "major"},
-    {"name": "Holi", "month": 3, "day": 25, "tithi": "Phalguna Purnima", "importance": "major"},
-    {"name": "Ram Navami", "month": 4, "day": 17, "tithi": "Chaitra Shukla Navami", "importance": "major"},
-    {"name": "Hanuman Jayanti", "month": 4, "day": 23, "tithi": "Chaitra Purnima", "importance": "major"},
-    {"name": "Akshaya Tritiya", "month": 5, "day": 10, "tithi": "Vaishakha Shukla Tritiya", "importance": "major"},
-    {"name": "Buddha Purnima", "month": 5, "day": 23, "tithi": "Vaishakha Purnima", "importance": "major"},
-    {"name": "Guru Purnima", "month": 7, "day": 21, "tithi": "Ashadha Purnima", "importance": "major"},
-    {"name": "Raksha Bandhan", "month": 8, "day": 19, "tithi": "Shravana Purnima", "importance": "major"},
-    {"name": "Janmashtami", "month": 8, "day": 26, "tithi": "Bhadrapada Krishna Ashtami", "importance": "major"},
-    {"name": "Ganesh Chaturthi", "month": 9, "day": 7, "tithi": "Bhadrapada Shukla Chaturthi", "importance": "major"},
-    {"name": "Navratri Begins", "month": 10, "day": 3, "tithi": "Ashwin Shukla Pratipada", "importance": "major"},
-    {"name": "Dussehra", "month": 10, "day": 12, "tithi": "Ashwin Shukla Dashami", "importance": "major"},
-    {"name": "Karwa Chauth", "month": 10, "day": 20, "tithi": "Kartik Krishna Chaturthi", "importance": "medium"},
-    {"name": "Diwali", "month": 11, "day": 1, "tithi": "Kartik Amavasya", "importance": "major"},
-    {"name": "Govardhan Puja", "month": 11, "day": 2, "tithi": "Kartik Shukla Pratipada", "importance": "medium"},
-    {"name": "Bhai Dooj", "month": 11, "day": 3, "tithi": "Kartik Shukla Dwitiya", "importance": "medium"},
-    {"name": "Dev Uthani Ekadashi", "month": 11, "day": 12, "tithi": "Kartik Shukla Ekadashi", "importance": "medium"},
-    {"name": "Tulsi Vivah", "month": 11, "day": 15, "tithi": "Kartik Shukla Dwadashi", "importance": "medium"},
+    {"name": "Vasant Panchami", "month": 2, "day": 3, "tithi": "Magha Shukla Panchami", "importance": "major"},
+    {"name": "Maha Shivaratri", "month": 2, "day": 26, "tithi": "Phalguna Krishna Chaturdashi", "importance": "major"},
+    {"name": "Holi", "month": 3, "day": 14, "tithi": "Phalguna Purnima", "importance": "major"},
+    {"name": "Ram Navami", "month": 4, "day": 6, "tithi": "Chaitra Shukla Navami", "importance": "major"},
+    {"name": "Hanuman Jayanti", "month": 4, "day": 12, "tithi": "Chaitra Purnima", "importance": "major"},
+    {"name": "Akshaya Tritiya", "month": 4, "day": 29, "tithi": "Vaishakha Shukla Tritiya", "importance": "major"},
+    {"name": "Buddha Purnima", "month": 5, "day": 12, "tithi": "Vaishakha Purnima", "importance": "major"},
+    {"name": "Guru Purnima", "month": 7, "day": 10, "tithi": "Ashadha Purnima", "importance": "major"},
+    {"name": "Raksha Bandhan", "month": 8, "day": 8, "tithi": "Shravana Purnima", "importance": "major"},
+    {"name": "Janmashtami", "month": 8, "day": 15, "tithi": "Bhadrapada Krishna Ashtami", "importance": "major"},
+    {"name": "Ganesh Chaturthi", "month": 8, "day": 27, "tithi": "Bhadrapada Shukla Chaturthi", "importance": "major"},
+    {"name": "Navratri Begins", "month": 9, "day": 21, "tithi": "Ashwin Shukla Pratipada", "importance": "major"},
+    {"name": "Dussehra", "month": 10, "day": 1, "tithi": "Ashwin Shukla Dashami", "importance": "major"},
+    {"name": "Karwa Chauth", "month": 10, "day": 9, "tithi": "Kartik Krishna Chaturthi", "importance": "medium"},
+    {"name": "Diwali", "month": 10, "day": 20, "tithi": "Kartik Amavasya", "importance": "major"},
+    {"name": "Govardhan Puja", "month": 10, "day": 21, "tithi": "Kartik Shukla Pratipada", "importance": "medium"},
+    {"name": "Bhai Dooj", "month": 10, "day": 22, "tithi": "Kartik Shukla Dwitiya", "importance": "medium"},
+    {"name": "Dev Uthani Ekadashi", "month": 10, "day": 31, "tithi": "Kartik Shukla Ekadashi", "importance": "medium"},
+    {"name": "Tulsi Vivah", "month": 11, "day": 3, "tithi": "Kartik Shukla Dwadashi", "importance": "medium"},
 ]
 
 # Rashis (Zodiac Signs) for horoscope

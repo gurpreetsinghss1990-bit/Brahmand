@@ -64,6 +64,11 @@ export default function CommunityDetailScreen() {
   useEffect(() => {
     if (community) {
       fetchMessages();
+      // Auto-open help request form when switching to non-Chat tabs
+      if (activeTab !== 'Chat') {
+        setRequestType(activeTab as any);
+        setShowRequestModal(true);
+      }
     }
   }, [activeTab, community]);
 
@@ -322,15 +327,6 @@ export default function CommunityDetailScreen() {
                 <Ionicons name="send" size={20} color="#FFFFFF" />
               )}
             </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Help Request Prompt - Show for non-Chat tabs */}
-        {activeTab !== 'Chat' && messages.length === 0 && (
-          <View style={styles.helpRequestPrompt}>
-            <Text style={styles.helpPromptText}>
-              Need {activeTab.toLowerCase()} help? Tap the + button above to create a structured request.
-            </Text>
           </View>
         )}
       </KeyboardAvoidingView>

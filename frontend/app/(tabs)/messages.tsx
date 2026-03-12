@@ -86,7 +86,7 @@ export default function MessagesScreen() {
         router.push('/dm/new');
         break;
       case 'circle':
-        alert('Circle creation coming soon!');
+        router.push('/circle/create');
         break;
     }
   };

@@ -13,7 +13,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { getCommunities, getCommunityMessages } from '../../src/services/api';
 import { useAuthStore } from '../../src/store/authStore';
 import { COLORS, SPACING } from '../../src/constants/theme';
-import { FloatingUtilityButton } from '../../src/components/FloatingUtilityButton';
 
 const TABS = ['Chat', 'Help', 'Blood', 'Medical', 'Financial', 'Petition'];
 
@@ -137,9 +136,6 @@ export default function CommunityScreen() {
           </View>
         }
       />
-
-      {/* Floating Utility Button */}
-      <FloatingUtilityButton />
     </View>
   );
 }
