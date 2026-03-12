@@ -1,368 +1,410 @@
 #!/usr/bin/env python3
 """
-Backend API Testing Script for SOS Emergency System and Spiritual Engine
-Tests all endpoints as specified in the review request
+Community Request System Backend API Testing
+Tests all Community Request APIs as per review request specifications
 """
 
 import requests
 import json
-import sys
+import time
+import random
 from datetime import datetime
-from typing import Dict, Any
 
-# Base URL for API testing - using environment configured URL
-BASE_URL = "https://brahmand-vendors.preview.emergentagent.com/api"
+# Backend configuration
+BASE_URL = "https://brahmand-requests.preview.emergentagent.com/api"
+MOCK_OTP = "123456"
 
-class Colors:
-    GREEN = '\033[92m'
-    RED = '\033[91m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    PURPLE = '\033[95m'
-    CYAN = '\033[96m'
-    WHITE = '\033[97m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-    END = '\033[0m'
-
-class APITester:
+class CommunityRequestTester:
     def __init__(self):
         self.session = requests.Session()
-        self.auth_token = None
-        self.user_data = {}
-        self.test_results = []
-        self.sos_id = None
+        self.token = None
+        self.user_data = None
+        self.test_requests = []
+        self.results = []
         
-    def log_test(self, test_name: str, success: bool, details: str = ""):
+    def log(self, message, success=True):
         """Log test results"""
-        status = f"{Colors.GREEN}✅ PASS{Colors.END}" if success else f"{Colors.RED}❌ FAIL{Colors.END}"
-        print(f"{status} {test_name}")
-        if details:
-            print(f"    {details}")
-        self.test_results.append({
-            'test': test_name,
-            'success': success,
-            'details': details,
-            'timestamp': datetime.now().isoformat()
-        })
+        status = "✅" if success else "❌"
+        print(f"{status} {message}")
+        self.results.append({"message": message, "success": success})
         
-    def make_request(self, method: str, endpoint: str, data: Dict = None, params: Dict = None, headers: Dict = None) -> Dict:
-        """Make API request with error handling"""
-        url = f"{BASE_URL}{endpoint}"
+    def post(self, endpoint, data=None, headers=None):
+        """Make POST request with authentication"""
+        if headers is None:
+            headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        headers["Content-Type"] = "application/json"
         
-        # Add auth header if token available
-        if self.auth_token and headers is None:
-            headers = {"Authorization": f"Bearer {self.auth_token}"}
-        elif self.auth_token and headers:
-            headers["Authorization"] = f"Bearer {self.auth_token}"
+        response = self.session.post(f"{BASE_URL}{endpoint}", 
+                                   json=data, headers=headers, timeout=30)
+        return response
+        
+    def get(self, endpoint, params=None, headers=None):
+        """Make GET request with authentication"""
+        if headers is None:
+            headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
             
+        response = self.session.get(f"{BASE_URL}{endpoint}", 
+                                  params=params, headers=headers, timeout=30)
+        return response
+        
+    def setup_authentication(self):
+        """Step 1: Setup authentication with mock OTP"""
         try:
-            if method.upper() == "GET":
-                response = self.session.get(url, params=params, headers=headers)
-            elif method.upper() == "POST":
-                response = self.session.post(url, json=data, headers=headers)
-            elif method.upper() == "PUT":
-                response = self.session.put(url, json=data, headers=headers)
-            elif method.upper() == "DELETE":
-                response = self.session.delete(url, headers=headers)
+            # Test phone number as specified in review request
+            phone_number = "+911234567890"
+            
+            # Send OTP
+            response = self.post("/auth/send-otp", {"phone": phone_number})
+            if response.status_code == 200:
+                self.log(f"OTP sent to {phone_number}")
+            else:
+                self.log(f"Failed to send OTP: {response.status_code} - {response.text}", False)
+                return False
                 
-            return {
-                'status_code': response.status_code,
-                'data': response.json() if response.content else {},
-                'success': 200 <= response.status_code < 300
-            }
+            # Verify OTP with mock code
+            response = self.post("/auth/verify-otp", {
+                "phone": phone_number,
+                "otp": MOCK_OTP
+            })
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("is_new_user"):
+                    self.log("OTP verified - new user detected")
+                    # Register user
+                    user_response = self.post("/auth/register", {
+                        "phone": phone_number,
+                        "name": "Test User",
+                        "language": "English"
+                    })
+                    
+                    if user_response.status_code == 200:
+                        user_data = user_response.json()
+                        self.token = user_data.get("token")
+                        self.user_data = user_data.get("user")
+                        self.log(f"User registered successfully with SL-ID: {self.user_data.get('sl_id')}")
+                        return True
+                    else:
+                        self.log(f"Registration failed: {user_response.status_code} - {user_response.text}", False)
+                        return False
+                else:
+                    # Existing user
+                    self.token = data.get("token")
+                    self.user_data = data.get("user")
+                    self.log(f"Existing user login successful with SL-ID: {self.user_data.get('sl_id')}")
+                    return True
+            else:
+                self.log(f"OTP verification failed: {response.status_code} - {response.text}", False)
+                return False
+                
         except Exception as e:
-            return {
-                'status_code': 0,
-                'data': {'error': str(e)},
-                'success': False
-            }
-    
-    def test_authentication(self):
-        """Test 1: User Authentication Flow"""
-        print(f"\n{Colors.BLUE}=== 1. AUTHENTICATION TESTING ==={Colors.END}")
-        
-        # Test OTP Send
-        phone = "+911111100005"
-        response = self.make_request("POST", "/auth/send-otp", {"phone": phone})
-        
-        if response['success']:
-            self.log_test("OTP Send", True, f"Status: {response['status_code']}")
-        else:
-            self.log_test("OTP Send", False, f"Status: {response['status_code']}, Error: {response['data']}")
+            self.log(f"Authentication setup error: {str(e)}", False)
             return False
             
-        # Test OTP Verify
-        response = self.make_request("POST", "/auth/verify-otp", {
-            "phone": phone,
-            "otp": "123456"
-        })
-        
-        if response['success']:
-            # Check if it's a new user who needs registration
-            if response['data'].get('is_new_user'):
-                self.log_test("OTP Verify (New User)", True, f"New user detected, proceeding to registration")
-                
-                # Register the new user
-                reg_response = self.make_request("POST", "/auth/register", {
-                    "phone": phone,
-                    "name": "Test SOS User",
-                    "language": "en"
-                })
-                
-                if reg_response['success'] and 'token' in reg_response['data']:
-                    self.auth_token = reg_response['data']['token']
-                    self.user_data = reg_response['data'].get('user', {})
-                    self.log_test("User Registration", True, f"Registration successful, SL-ID: {self.user_data.get('sl_id', 'N/A')}")
+    def test_help_request(self):
+        """Step 2: Test help request creation"""
+        try:
+            help_data = {
+                "request_type": "help",
+                "title": "Need help with groceries",
+                "description": "Need someone to help me get groceries from the market",
+                "contact_number": "+911234567890",
+                "visibility_level": "area",
+                "urgency_level": "low"
+            }
+            
+            response = self.post("/community-requests", help_data)
+            
+            if response.status_code in [200, 201]:
+                request_data = response.json()
+                request_id = request_data.get("id")
+                if request_id:
+                    self.test_requests.append({"id": request_id, "type": "help"})
+                    self.log(f"Help request created successfully - ID: {request_id}")
                     return True
                 else:
-                    self.log_test("User Registration", False, f"Status: {reg_response['status_code']}, Error: {reg_response['data']}")
+                    self.log("Help request created but no ID returned", False)
                     return False
-            elif 'token' in response['data']:
-                # Existing user with token
-                self.auth_token = response['data']['token']
-                self.user_data = response['data'].get('user', {})
-                self.log_test("OTP Verify (Existing User)", True, f"Token received: {self.auth_token[:20]}...")
-                return True
             else:
-                self.log_test("OTP Verify", False, f"Unexpected response format: {response['data']}")
+                self.log(f"Help request creation failed: {response.status_code} - {response.text}", False)
                 return False
-        else:
-            self.log_test("OTP Verify", False, f"Status: {response['status_code']}, Error: {response['data']}")
-            return False
-    
-    def test_sos_emergency_system(self):
-        """Test 2: SOS Emergency System"""
-        print(f"\n{Colors.PURPLE}=== 2. SOS EMERGENCY SYSTEM ==={Colors.END}")
-        
-        # Test Create SOS Alert
-        sos_data = {
-            "latitude": 19.0760,
-            "longitude": 72.8777,
-            "area": "Andheri",
-            "city": "Mumbai",
-            "state": "Maharashtra"
-        }
-        
-        response = self.make_request("POST", "/sos", sos_data)
-        if response['success']:
-            self.sos_id = response['data'].get('id')
-            self.log_test("Create SOS Alert", True, f"SOS ID: {self.sos_id}")
-        else:
-            self.log_test("Create SOS Alert", False, f"Status: {response['status_code']}, Error: {response['data']}")
-            
-        # Test Get My SOS
-        response = self.make_request("GET", "/sos/my")
-        if response['success']:
-            has_sos = response['data'] is not None
-            self.log_test("Get My SOS", True, f"Active SOS found: {has_sos}")
-        else:
-            self.log_test("Get My SOS", False, f"Status: {response['status_code']}, Error: {response['data']}")
-            
-        # Test Get Nearby SOS
-        params = {"lat": 19.0760, "lng": 72.8777, "radius": 10}
-        response = self.make_request("GET", "/sos/nearby", params=params)
-        if response['success']:
-            nearby_count = len(response['data']) if isinstance(response['data'], list) else 0
-            self.log_test("Get Nearby SOS", True, f"Found {nearby_count} nearby SOS alerts")
-        else:
-            self.log_test("Get Nearby SOS", False, f"Status: {response['status_code']}, Error: {response['data']}")
-            
-        # Test Respond to SOS (if we have an SOS ID)
-        if self.sos_id:
-            response = self.make_request("POST", f"/sos/{self.sos_id}/respond", {"response": "coming"})
-            if response['success']:
-                self.log_test("Respond to SOS", True, f"Response recorded")
-            else:
-                self.log_test("Respond to SOS", False, f"Status: {response['status_code']}, Error: {response['data']}")
                 
-            # Test Resolve SOS
-            response = self.make_request("POST", f"/sos/{self.sos_id}/resolve", {"status": "resolved"})
-            if response['success']:
-                self.log_test("Resolve SOS", True, f"SOS resolved")
+        except Exception as e:
+            self.log(f"Help request test error: {str(e)}", False)
+            return False
+            
+    def test_blood_request(self):
+        """Step 3: Test blood request creation"""
+        try:
+            blood_data = {
+                "request_type": "blood",
+                "title": "Blood Required Urgently",
+                "description": "A+ blood needed for surgery",
+                "contact_number": "+911234567890",
+                "visibility_level": "city",
+                "urgency_level": "critical",
+                "blood_group": "A+",
+                "hospital_name": "City Hospital",
+                "location": "Mumbai Central"
+            }
+            
+            response = self.post("/community-requests", blood_data)
+            
+            if response.status_code in [200, 201]:
+                request_data = response.json()
+                request_id = request_data.get("id")
+                if request_id:
+                    self.test_requests.append({"id": request_id, "type": "blood"})
+                    self.log(f"Blood request created successfully - ID: {request_id}")
+                    # Verify blood-specific fields
+                    if request_data.get("blood_group") == "A+" and request_data.get("hospital_name") == "City Hospital":
+                        self.log("Blood request specific fields verified correctly")
+                        return True
+                    else:
+                        self.log("Blood request missing specific fields", False)
+                        return False
+                else:
+                    self.log("Blood request created but no ID returned", False)
+                    return False
             else:
-                self.log_test("Resolve SOS", False, f"Status: {response['status_code']}, Error: {response['data']}")
-        else:
-            self.log_test("Respond to SOS", False, "No SOS ID available from creation")
-            self.log_test("Resolve SOS", False, "No SOS ID available from creation")
-    
-    def test_spiritual_engine_panchang(self):
-        """Test 3: Spiritual Engine - Panchang"""
-        print(f"\n{Colors.CYAN}=== 3. SPIRITUAL ENGINE - PANCHANG ==={Colors.END}")
-        
-        # Test Get Today's Panchang
-        response = self.make_request("GET", "/spiritual/panchang")
-        if response['success']:
-            panchang = response['data']
-            required_fields = ['date', 'tithi', 'nakshatra', 'yoga', 'karana']
-            has_required = all(field in panchang for field in required_fields)
-            self.log_test("Get Today's Panchang", has_required, 
-                         f"Date: {panchang.get('date')}, Tithi: {panchang.get('tithi')}")
-        else:
-            self.log_test("Get Today's Panchang", False, f"Status: {response['status_code']}, Error: {response['data']}")
+                self.log(f"Blood request creation failed: {response.status_code} - {response.text}", False)
+                return False
+                
+        except Exception as e:
+            self.log(f"Blood request test error: {str(e)}", False)
+            return False
             
-        # Test Get Specific Date Panchang
-        params = {
-            "lat": 28.6139,
-            "lng": 77.2090,
-            "date_str": "2026-03-15"
-        }
-        response = self.make_request("GET", "/spiritual/panchang", params=params)
-        if response['success']:
-            panchang = response['data']
-            is_specific_date = panchang.get('date') == "2026-03-15"
-            self.log_test("Get Specific Date Panchang", is_specific_date, 
-                         f"Date: {panchang.get('date')}, Location: Delhi")
-        else:
-            self.log_test("Get Specific Date Panchang", False, f"Status: {response['status_code']}, Error: {response['data']}")
-    
-    def test_spiritual_engine_festivals(self):
-        """Test 4: Spiritual Engine - Festivals"""
-        print(f"\n{Colors.CYAN}=== 4. SPIRITUAL ENGINE - FESTIVALS ==={Colors.END}")
-        
-        # Test Get Upcoming Festivals (default)
-        response = self.make_request("GET", "/spiritual/festivals")
-        if response['success']:
-            festivals = response['data']
-            is_list = isinstance(festivals, list)
-            has_festivals = len(festivals) > 0 if is_list else False
-            self.log_test("Get Upcoming Festivals", is_list and has_festivals, 
-                         f"Found {len(festivals) if is_list else 0} upcoming festivals")
-        else:
-            self.log_test("Get Upcoming Festivals", False, f"Status: {response['status_code']}, Error: {response['data']}")
+    def test_medical_request(self):
+        """Step 4: Test medical request creation"""
+        try:
+            medical_data = {
+                "request_type": "medical",
+                "title": "Need medical supplies",
+                "description": "Looking for oxygen cylinder",
+                "contact_number": "+911234567890",
+                "urgency_level": "high"
+            }
             
-        # Test Get Limited Festivals
-        params = {"limit": 3}
-        response = self.make_request("GET", "/spiritual/festivals", params=params)
-        if response['success']:
-            festivals = response['data']
-            is_list = isinstance(festivals, list)
-            correct_limit = len(festivals) <= 3 if is_list else False
-            self.log_test("Get 3 Upcoming Festivals", is_list and correct_limit, 
-                         f"Returned {len(festivals) if is_list else 0} festivals (limit: 3)")
-        else:
-            self.log_test("Get 3 Upcoming Festivals", False, f"Status: {response['status_code']}, Error: {response['data']}")
-    
-    def test_spiritual_engine_horoscope(self):
-        """Test 5: Spiritual Engine - Horoscope"""
-        print(f"\n{Colors.CYAN}=== 5. SPIRITUAL ENGINE - HOROSCOPE ==={Colors.END}")
-        
-        # Test Get All Rashis
-        response = self.make_request("GET", "/spiritual/rashis")
-        if response['success']:
-            rashis = response['data']
-            has_mesh = 'Mesh' in rashis
-            has_english = rashis.get('Mesh', {}).get('english') == 'Aries' if has_mesh else False
-            self.log_test("Get All Rashis", has_mesh and has_english, 
-                         f"Found {len(rashis)} rashis, Mesh -> {rashis.get('Mesh', {}).get('english')}")
-        else:
-            self.log_test("Get All Rashis", False, f"Status: {response['status_code']}, Error: {response['data']}")
+            response = self.post("/community-requests", medical_data)
             
-        # Test Get Horoscope for Specific Rashi
-        response = self.make_request("GET", "/spiritual/horoscope/Mesh")
-        if response['success']:
-            horoscope = response['data']
-            has_prediction = 'prediction' in horoscope
-            is_aries = horoscope.get('rashi_english') == 'Aries'
-            self.log_test("Get Horoscope for Aries", has_prediction and is_aries, 
-                         f"Rashi: {horoscope.get('rashi')}, Prediction available: {has_prediction}")
-        else:
-            self.log_test("Get Horoscope for Aries", False, f"Status: {response['status_code']}, Error: {response['data']}")
+            if response.status_code in [200, 201]:
+                request_data = response.json()
+                request_id = request_data.get("id")
+                if request_id:
+                    self.test_requests.append({"id": request_id, "type": "medical"})
+                    self.log(f"Medical request created successfully - ID: {request_id}")
+                    return True
+                else:
+                    self.log("Medical request created but no ID returned", False)
+                    return False
+            else:
+                self.log(f"Medical request creation failed: {response.status_code} - {response.text}", False)
+                return False
+                
+        except Exception as e:
+            self.log(f"Medical request test error: {str(e)}", False)
+            return False
             
-        # Test Get User's Horoscope (should say no profile initially)
-        response = self.make_request("GET", "/spiritual/horoscope")
-        if response['success']:
-            result = response['data']
-            no_profile = not result.get('has_profile', True)
-            has_message = 'message' in result
-            self.log_test("Get User Horoscope (No Profile)", no_profile and has_message, 
-                         f"Message: {result.get('message', '')}")
-        else:
-            self.log_test("Get User Horoscope (No Profile)", False, f"Status: {response['status_code']}, Error: {response['data']}")
-    
-    def test_astrology_profile(self):
-        """Test 6: Astrology Profile Management"""
-        print(f"\n{Colors.YELLOW}=== 6. ASTROLOGY PROFILE ==={Colors.END}")
-        
-        # Test Set Astrology Profile
-        profile_data = {
-            "date_of_birth": "1990-05-15",
-            "time_of_birth": "10:30",
-            "place_of_birth": "Mumbai"
-        }
-        
-        response = self.make_request("PUT", "/user/astrology-profile", profile_data)
-        if response['success']:
-            self.log_test("Set Astrology Profile", True, f"Profile updated successfully")
-        else:
-            self.log_test("Set Astrology Profile", False, f"Status: {response['status_code']}, Error: {response['data']}")
+    def test_financial_request(self):
+        """Step 5: Test financial request creation"""
+        try:
+            financial_data = {
+                "request_type": "financial",
+                "title": "Financial assistance needed",
+                "description": "Need help with hospital bills",
+                "contact_number": "+911234567890",
+                "urgency_level": "medium",
+                "amount": 50000
+            }
             
-        # Test Get Astrology Profile
-        response = self.make_request("GET", "/user/astrology-profile")
-        if response['success']:
-            profile = response['data']
-            has_dob = profile.get('date_of_birth') == "1990-05-15"
-            has_rashi = 'rashi' in profile
-            calculated_rashi = profile.get('rashi')
-            self.log_test("Get Astrology Profile", has_dob and has_rashi, 
-                         f"DOB: {profile.get('date_of_birth')}, Calculated Rashi: {calculated_rashi}")
-        else:
-            self.log_test("Get Astrology Profile", False, f"Status: {response['status_code']}, Error: {response['data']}")
+            response = self.post("/community-requests", financial_data)
             
-        # Test Get User's Horoscope (should now return personalized)
-        response = self.make_request("GET", "/spiritual/horoscope")
-        if response['success']:
-            result = response['data']
-            has_profile = result.get('has_profile', False)
-            has_prediction = 'prediction' in result
-            user_rashi = result.get('rashi')
-            self.log_test("Get Personalized Horoscope", has_profile and has_prediction, 
-                         f"Rashi: {user_rashi}, Has Profile: {has_profile}")
-        else:
-            self.log_test("Get Personalized Horoscope", False, f"Status: {response['status_code']}, Error: {response['data']}")
-    
-    def print_summary(self):
-        """Print test summary"""
-        print(f"\n{Colors.BOLD}=== TEST SUMMARY ==={Colors.END}")
+            if response.status_code in [200, 201]:
+                request_data = response.json()
+                request_id = request_data.get("id")
+                if request_id:
+                    self.test_requests.append({"id": request_id, "type": "financial"})
+                    self.log(f"Financial request created successfully - ID: {request_id}")
+                    # Verify amount field
+                    if request_data.get("amount") == 50000:
+                        self.log("Financial request amount field verified correctly")
+                        return True
+                    else:
+                        self.log("Financial request missing amount field", False)
+                        return False
+                else:
+                    self.log("Financial request created but no ID returned", False)
+                    return False
+            else:
+                self.log(f"Financial request creation failed: {response.status_code} - {response.text}", False)
+                return False
+                
+        except Exception as e:
+            self.log(f"Financial request test error: {str(e)}", False)
+            return False
+            
+    def test_petition_request(self):
+        """Step 6: Test petition creation"""
+        try:
+            petition_data = {
+                "request_type": "petition",
+                "title": "Save the Temple Garden",
+                "description": "Petition to save the temple garden from being demolished",
+                "contact_number": "+911234567890",
+                "support_needed": "1000 signatures",
+                "contact_person_name": "Temple Committee"
+            }
+            
+            response = self.post("/community-requests", petition_data)
+            
+            if response.status_code in [200, 201]:
+                request_data = response.json()
+                request_id = request_data.get("id")
+                if request_id:
+                    self.test_requests.append({"id": request_id, "type": "petition"})
+                    self.log(f"Petition created successfully - ID: {request_id}")
+                    # Verify petition-specific fields
+                    if (request_data.get("support_needed") == "1000 signatures" and 
+                        request_data.get("contact_person_name") == "Temple Committee"):
+                        self.log("Petition specific fields verified correctly")
+                        return True
+                    else:
+                        self.log("Petition missing specific fields", False)
+                        return False
+                else:
+                    self.log("Petition created but no ID returned", False)
+                    return False
+            else:
+                self.log(f"Petition creation failed: {response.status_code} - {response.text}", False)
+                return False
+                
+        except Exception as e:
+            self.log(f"Petition test error: {str(e)}", False)
+            return False
+            
+    def test_get_requests_by_type(self):
+        """Step 7: Test filtering requests by type"""
+        try:
+            success_count = 0
+            
+            # Test blood requests filter
+            response = self.get("/community-requests", params={"type": "blood"})
+            if response.status_code == 200:
+                blood_requests = response.json()
+                if any(req.get("request_type") == "blood" for req in blood_requests):
+                    self.log("GET /community-requests?type=blood returned blood requests")
+                    success_count += 1
+                else:
+                    self.log("No blood requests found in filtered results", False)
+            else:
+                self.log(f"Failed to get blood requests: {response.status_code} - {response.text}", False)
+                
+            # Test petition requests filter  
+            response = self.get("/community-requests", params={"type": "petition"})
+            if response.status_code == 200:
+                petition_requests = response.json()
+                if any(req.get("request_type") == "petition" for req in petition_requests):
+                    self.log("GET /community-requests?type=petition returned petition requests")
+                    success_count += 1
+                else:
+                    self.log("No petition requests found in filtered results", False)
+            else:
+                self.log(f"Failed to get petition requests: {response.status_code} - {response.text}", False)
+                
+            return success_count == 2
+            
+        except Exception as e:
+            self.log(f"Get requests by type test error: {str(e)}", False)
+            return False
+            
+    def test_get_my_requests(self):
+        """Step 8: Test getting user's own requests"""
+        try:
+            response = self.get("/community-requests/my")
+            
+            if response.status_code == 200:
+                my_requests = response.json()
+                expected_types = {"help", "blood", "medical", "financial", "petition"}
+                found_types = {req.get("request_type") for req in my_requests}
+                
+                if expected_types.issubset(found_types):
+                    self.log(f"GET /community-requests/my returned all 5 expected request types")
+                    self.log(f"Total requests found: {len(my_requests)}")
+                    return True
+                else:
+                    missing_types = expected_types - found_types
+                    self.log(f"Missing request types in my requests: {missing_types}", False)
+                    return False
+            else:
+                self.log(f"Failed to get my requests: {response.status_code} - {response.text}", False)
+                return False
+                
+        except Exception as e:
+            self.log(f"Get my requests test error: {str(e)}", False)
+            return False
+            
+    def run_comprehensive_test(self):
+        """Run all Community Request System tests"""
+        print("=" * 60)
+        print("COMMUNITY REQUEST SYSTEM API TESTING")
+        print("=" * 60)
         
-        total_tests = len(self.test_results)
-        passed_tests = sum(1 for test in self.test_results if test['success'])
-        failed_tests = total_tests - passed_tests
+        # Test sequence as specified in review request
+        test_functions = [
+            ("1. Authentication Setup", self.setup_authentication),
+            ("2. Create Help Request", self.test_help_request),  
+            ("3. Create Blood Request", self.test_blood_request),
+            ("4. Create Medical Request", self.test_medical_request),
+            ("5. Create Financial Request", self.test_financial_request),
+            ("6. Create Petition", self.test_petition_request),
+            ("7. Get Requests by Type", self.test_get_requests_by_type),
+            ("8. Get My Requests", self.test_get_my_requests)
+        ]
         
+        passed_tests = 0
+        total_tests = len(test_functions)
+        
+        for test_name, test_func in test_functions:
+            print(f"\n--- {test_name} ---")
+            try:
+                if test_func():
+                    passed_tests += 1
+                    print(f"✅ {test_name} PASSED")
+                else:
+                    print(f"❌ {test_name} FAILED")
+            except Exception as e:
+                print(f"❌ {test_name} ERROR: {str(e)}")
+        
+        # Final summary
+        print("\n" + "=" * 60)
+        print("COMMUNITY REQUEST SYSTEM TEST SUMMARY")
+        print("=" * 60)
         print(f"Total Tests: {total_tests}")
-        print(f"{Colors.GREEN}Passed: {passed_tests}{Colors.END}")
-        print(f"{Colors.RED}Failed: {failed_tests}{Colors.END}")
+        print(f"Passed: {passed_tests}")
+        print(f"Failed: {total_tests - passed_tests}")
         print(f"Success Rate: {(passed_tests/total_tests)*100:.1f}%")
         
-        if failed_tests > 0:
-            print(f"\n{Colors.RED}FAILED TESTS:{Colors.END}")
-            for test in self.test_results:
-                if not test['success']:
-                    print(f"  ❌ {test['test']}: {test['details']}")
-        
-        return passed_tests, failed_tests
-    
-    def run_all_tests(self):
-        """Run all test suites"""
-        print(f"{Colors.BOLD}{Colors.UNDERLINE}SOS EMERGENCY SYSTEM & SPIRITUAL ENGINE API TESTING{Colors.END}")
-        print(f"Base URL: {BASE_URL}")
-        print(f"Test started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        # Run tests in sequence
-        if self.test_authentication():
-            self.test_sos_emergency_system()
-            self.test_spiritual_engine_panchang()
-            self.test_spiritual_engine_festivals()
-            self.test_spiritual_engine_horoscope()
-            self.test_astrology_profile()
+        if passed_tests == total_tests:
+            print("🎉 ALL COMMUNITY REQUEST SYSTEM TESTS PASSED!")
         else:
-            print(f"{Colors.RED}Authentication failed, skipping other tests{Colors.END}")
+            print("⚠️  SOME TESTS FAILED - CHECK LOGS ABOVE")
             
-        return self.print_summary()
+        return passed_tests, total_tests
+
+def main():
+    """Main test execution"""
+    tester = CommunityRequestTester()
+    passed, total = tester.run_comprehensive_test()
+    
+    # Exit with error code if tests failed
+    if passed < total:
+        exit(1)
+    else:
+        exit(0)
 
 if __name__ == "__main__":
-    tester = APITester()
-    passed, failed = tester.run_all_tests()
-    
-    # Exit with error code if any tests failed
-    sys.exit(1 if failed > 0 else 0)
+    main()

@@ -470,3 +470,47 @@ class AstrologyProfile(BaseModel):
     time_of_birth: Optional[str] = None  # HH:MM
     place_of_birth: Optional[str] = None
     rashi: Optional[str] = None
+
+
+# ================= COMMUNITY REQUEST MODELS =================
+
+class RequestType(str, Enum):
+    HELP = "help"
+    BLOOD = "blood"
+    MEDICAL = "medical"
+    FINANCIAL = "financial"
+    PETITION = "petition"
+
+
+class RequestUrgency(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class VisibilityLevel(str, Enum):
+    AREA = "area"
+    CITY = "city"
+    STATE = "state"
+    NATIONAL = "national"
+
+
+class CommunityRequestCreate(BaseModel):
+    community_id: Optional[str] = None
+    request_type: RequestType
+    visibility_level: VisibilityLevel = VisibilityLevel.AREA
+    title: str = Field(..., min_length=2, max_length=200)
+    description: str = Field(..., min_length=10, max_length=2000)
+    contact_number: str
+    urgency_level: RequestUrgency = RequestUrgency.LOW
+    # Blood specific
+    blood_group: Optional[str] = None
+    hospital_name: Optional[str] = None
+    location: Optional[str] = None
+    # Financial specific
+    amount: Optional[float] = None
+    # Petition specific
+    contact_person_name: Optional[str] = None
+    support_needed: Optional[str] = None
+    attachments: Optional[List[str]] = None

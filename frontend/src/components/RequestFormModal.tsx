@@ -29,9 +29,10 @@ const VISIBILITY_OPTIONS = [
 ];
 
 const URGENCY_OPTIONS = [
-  { key: 'normal', label: 'Low', color: COLORS.success },
-  { key: 'urgent', label: 'Medium', color: COLORS.warning },
-  { key: 'critical', label: 'High', color: COLORS.error },
+  { key: 'low', label: 'Low', color: COLORS.success },
+  { key: 'medium', label: 'Medium', color: COLORS.warning },
+  { key: 'high', label: 'High', color: '#E67E22' },
+  { key: 'critical', label: 'Critical', color: COLORS.error },
 ];
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
@@ -44,7 +45,7 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [visibility, setVisibility] = useState('area');
-  const [urgency, setUrgency] = useState('normal');
+  const [urgency, setUrgency] = useState('low');
   
   // Common fields
   const [title, setTitle] = useState('');
@@ -58,6 +59,11 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
   
   // Financial specific
   const [amount, setAmount] = useState('');
+
+  // Petition specific
+  const [petitionTitle, setPetitionTitle] = useState('');
+  const [supportNeeded, setSupportNeeded] = useState('');
+  const [contactPersonName, setContactPersonName] = useState('');
   
   const resetForm = () => {
     setTitle('');
@@ -67,22 +73,57 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
     setHospitalName('');
     setLocation('');
     setAmount('');
+    setPetitionTitle('');
+    setSupportNeeded('');
+    setContactPersonName('');
     setVisibility('area');
-    setUrgency('normal');
+    setUrgency('low');
   };
 
   const handleSubmit = async () => {
+    // Validation
+    if (!description.trim()) {
+      return;
+    }
+    if (!contactNumber.trim()) {
+      return;
+    }
+    if (requestType === 'Blood' && !bloodGroup) {
+      return;
+    }
+    if (requestType === 'Petition' && !petitionTitle.trim()) {
+      return;
+    }
+
     setLoading(true);
     try {
       const data = {
-        type: requestType.toLowerCase(),
-        visibility,
-        urgency,
-        title,
+        request_type: requestType.toLowerCase(),
+        visibility_level: visibility,
+        urgency_level: urgency,
+        title: requestType === 'Petition' ? petitionTitle : (title || `${requestType} Request`),
         description,
         contact_number: contactNumber,
-        ...(requestType === 'Blood' && { blood_group: bloodGroup, hospital_name: hospitalName, location }),
-        ...(requestType === 'Financial' && { amount: parseFloat(amount) || 0 }),
+        // Blood specific
+        ...(requestType === 'Blood' && { 
+          blood_group: bloodGroup, 
+          hospital_name: hospitalName, 
+          location 
+        }),
+        // Financial specific
+        ...(requestType === 'Financial' && { 
+          amount: parseFloat(amount) || 0 
+        }),
+        // Medical specific
+        ...(requestType === 'Medical' && { 
+          hospital_name: hospitalName,
+          location 
+        }),
+        // Petition specific
+        ...(requestType === 'Petition' && {
+          support_needed: supportNeeded,
+          contact_person_name: contactPersonName,
+        }),
       };
       await onSubmit(data);
       resetForm();
@@ -96,7 +137,7 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
 
   const getTitle = () => {
     switch (requestType) {
-      case 'Blood': return 'Blood Request';
+      case 'Blood': return 'Blood Donation Request';
       case 'Medical': return 'Medical Help Request';
       case 'Financial': return 'Financial Help Request';
       case 'Petition': return 'Create Petition';
@@ -114,6 +155,251 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
     }
   };
 
+  const getIconColor = () => {
+    switch (requestType) {
+      case 'Blood': return '#E74C3C';
+      case 'Medical': return '#27AE60';
+      case 'Financial': return '#F39C12';
+      case 'Petition': return '#9B59B6';
+      default: return COLORS.primary;
+    }
+  };
+
+  // Render Petition-specific form
+  const renderPetitionForm = () => (
+    <>
+      <Text style={styles.label}>Petition Title *</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="What is this petition about?"
+        placeholderTextColor={COLORS.textLight}
+        value={petitionTitle}
+        onChangeText={setPetitionTitle}
+      />
+
+      <Text style={styles.label}>Support Needed</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="e.g., 1000 signatures, community support"
+        placeholderTextColor={COLORS.textLight}
+        value={supportNeeded}
+        onChangeText={setSupportNeeded}
+      />
+
+      <Text style={styles.label}>Description *</Text>
+      <TextInput
+        style={[styles.input, styles.textArea]}
+        placeholder="Explain the cause and why people should support..."
+        placeholderTextColor={COLORS.textLight}
+        value={description}
+        onChangeText={setDescription}
+        multiline
+        numberOfLines={5}
+        textAlignVertical="top"
+      />
+
+      <Text style={styles.label}>Contact Person Name</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Your name or organization name"
+        placeholderTextColor={COLORS.textLight}
+        value={contactPersonName}
+        onChangeText={setContactPersonName}
+      />
+
+      <Text style={styles.label}>Contact Number *</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="+91 XXXXX XXXXX"
+        placeholderTextColor={COLORS.textLight}
+        value={contactNumber}
+        onChangeText={setContactNumber}
+        keyboardType="phone-pad"
+      />
+    </>
+  );
+
+  // Render standard request form
+  const renderStandardForm = () => (
+    <>
+      {/* Visibility Selector */}
+      <Text style={styles.label}>Post Request Visibility</Text>
+      <View style={styles.visibilityContainer}>
+        {VISIBILITY_OPTIONS.map((option) => (
+          <TouchableOpacity
+            key={option.key}
+            style={[
+              styles.visibilityOption,
+              visibility === option.key && styles.visibilityOptionSelected,
+            ]}
+            onPress={() => setVisibility(option.key)}
+          >
+            <View style={styles.radioOuter}>
+              {visibility === option.key && <View style={styles.radioInner} />}
+            </View>
+            <Ionicons 
+              name={option.icon as any} 
+              size={18} 
+              color={visibility === option.key ? COLORS.primary : COLORS.textSecondary} 
+            />
+            <Text style={[
+              styles.visibilityText,
+              visibility === option.key && styles.visibilityTextSelected,
+            ]}>
+              {option.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Blood Group Selector (for Blood requests) */}
+      {requestType === 'Blood' && (
+        <>
+          <Text style={styles.label}>Blood Group Required *</Text>
+          <View style={styles.bloodGroupContainer}>
+            {BLOOD_GROUPS.map((bg) => (
+              <TouchableOpacity
+                key={bg}
+                style={[
+                  styles.bloodGroupBtn,
+                  bloodGroup === bg && styles.bloodGroupBtnSelected,
+                ]}
+                onPress={() => setBloodGroup(bg)}
+              >
+                <Text style={[
+                  styles.bloodGroupText,
+                  bloodGroup === bg && styles.bloodGroupTextSelected,
+                ]}>
+                  {bg}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={styles.label}>Hospital Name *</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter hospital name"
+            placeholderTextColor={COLORS.textLight}
+            value={hospitalName}
+            onChangeText={setHospitalName}
+          />
+
+          <Text style={styles.label}>Location *</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter address/location"
+            placeholderTextColor={COLORS.textLight}
+            value={location}
+            onChangeText={setLocation}
+          />
+        </>
+      )}
+
+      {/* Medical specific fields */}
+      {requestType === 'Medical' && (
+        <>
+          <Text style={styles.label}>Hospital/Clinic Name</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter hospital or clinic name"
+            placeholderTextColor={COLORS.textLight}
+            value={hospitalName}
+            onChangeText={setHospitalName}
+          />
+
+          <Text style={styles.label}>Location</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter location/address"
+            placeholderTextColor={COLORS.textLight}
+            value={location}
+            onChangeText={setLocation}
+          />
+        </>
+      )}
+
+      {/* Urgency Level */}
+      <Text style={styles.label}>Urgency Level</Text>
+      <View style={styles.urgencyContainer}>
+        {URGENCY_OPTIONS.map((option) => (
+          <TouchableOpacity
+            key={option.key}
+            style={[
+              styles.urgencyBtn,
+              urgency === option.key && { backgroundColor: `${option.color}15`, borderColor: option.color },
+            ]}
+            onPress={() => setUrgency(option.key)}
+          >
+            <View style={[
+              styles.urgencyDot,
+              { backgroundColor: option.color },
+            ]} />
+            <Text style={[
+              styles.urgencyText,
+              urgency === option.key && { color: option.color, fontWeight: '600' },
+            ]}>
+              {option.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Amount (for Financial requests) */}
+      {requestType === 'Financial' && (
+        <>
+          <Text style={styles.label}>Amount Required (Rs)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter amount needed"
+            placeholderTextColor={COLORS.textLight}
+            value={amount}
+            onChangeText={setAmount}
+            keyboardType="numeric"
+          />
+        </>
+      )}
+
+      {/* Title (for Help requests) */}
+      {requestType === 'Help' && (
+        <>
+          <Text style={styles.label}>Title *</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Brief title for your request"
+            placeholderTextColor={COLORS.textLight}
+            value={title}
+            onChangeText={setTitle}
+          />
+        </>
+      )}
+
+      {/* Description */}
+      <Text style={styles.label}>Description *</Text>
+      <TextInput
+        style={[styles.input, styles.textArea]}
+        placeholder="Describe your request in detail..."
+        placeholderTextColor={COLORS.textLight}
+        value={description}
+        onChangeText={setDescription}
+        multiline
+        numberOfLines={4}
+        textAlignVertical="top"
+      />
+
+      {/* Contact Number */}
+      <Text style={styles.label}>Contact Number *</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="+91 XXXXX XXXXX"
+        placeholderTextColor={COLORS.textLight}
+        value={contactNumber}
+        onChangeText={setContactNumber}
+        keyboardType="phone-pad"
+      />
+    </>
+  );
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <KeyboardAvoidingView 
@@ -124,8 +410,8 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerLeft}>
-              <View style={[styles.iconBg, { backgroundColor: `${COLORS.error}15` }]}>
-                <Ionicons name={getIcon()} size={20} color={COLORS.error} />
+              <View style={[styles.iconBg, { backgroundColor: `${getIconColor()}15` }]}>
+                <Ionicons name={getIcon()} size={20} color={getIconColor()} />
               </View>
               <Text style={styles.headerTitle}>{getTitle()}</Text>
             </View>
@@ -135,158 +421,7 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
           </View>
 
           <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
-            {/* Visibility Selector */}
-            <Text style={styles.label}>Post Request Visibility</Text>
-            <View style={styles.visibilityContainer}>
-              {VISIBILITY_OPTIONS.map((option) => (
-                <TouchableOpacity
-                  key={option.key}
-                  style={[
-                    styles.visibilityOption,
-                    visibility === option.key && styles.visibilityOptionSelected,
-                  ]}
-                  onPress={() => setVisibility(option.key)}
-                >
-                  <View style={styles.radioOuter}>
-                    {visibility === option.key && <View style={styles.radioInner} />}
-                  </View>
-                  <Ionicons 
-                    name={option.icon as any} 
-                    size={18} 
-                    color={visibility === option.key ? COLORS.primary : COLORS.textSecondary} 
-                  />
-                  <Text style={[
-                    styles.visibilityText,
-                    visibility === option.key && styles.visibilityTextSelected,
-                  ]}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Blood Group Selector (for Blood requests) */}
-            {requestType === 'Blood' && (
-              <>
-                <Text style={styles.label}>Blood Group *</Text>
-                <View style={styles.bloodGroupContainer}>
-                  {BLOOD_GROUPS.map((bg) => (
-                    <TouchableOpacity
-                      key={bg}
-                      style={[
-                        styles.bloodGroupBtn,
-                        bloodGroup === bg && styles.bloodGroupBtnSelected,
-                      ]}
-                      onPress={() => setBloodGroup(bg)}
-                    >
-                      <Text style={[
-                        styles.bloodGroupText,
-                        bloodGroup === bg && styles.bloodGroupTextSelected,
-                      ]}>
-                        {bg}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Text style={styles.label}>Hospital Name *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter hospital name"
-                  placeholderTextColor={COLORS.textLight}
-                  value={hospitalName}
-                  onChangeText={setHospitalName}
-                />
-
-                <Text style={styles.label}>Location *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter address/location"
-                  placeholderTextColor={COLORS.textLight}
-                  value={location}
-                  onChangeText={setLocation}
-                />
-              </>
-            )}
-
-            {/* Urgency Level */}
-            <Text style={styles.label}>Urgency Level</Text>
-            <View style={styles.urgencyContainer}>
-              {URGENCY_OPTIONS.map((option) => (
-                <TouchableOpacity
-                  key={option.key}
-                  style={[
-                    styles.urgencyBtn,
-                    urgency === option.key && { backgroundColor: `${option.color}15`, borderColor: option.color },
-                  ]}
-                  onPress={() => setUrgency(option.key)}
-                >
-                  <View style={[
-                    styles.urgencyDot,
-                    { backgroundColor: option.color },
-                  ]} />
-                  <Text style={[
-                    styles.urgencyText,
-                    urgency === option.key && { color: option.color, fontWeight: '600' },
-                  ]}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Amount (for Financial requests) */}
-            {requestType === 'Financial' && (
-              <>
-                <Text style={styles.label}>Amount Required (₹)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter amount"
-                  placeholderTextColor={COLORS.textLight}
-                  value={amount}
-                  onChangeText={setAmount}
-                  keyboardType="numeric"
-                />
-              </>
-            )}
-
-            {/* Title (for Petition and Help) */}
-            {(requestType === 'Petition' || requestType === 'Help') && (
-              <>
-                <Text style={styles.label}>Title *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter title"
-                  placeholderTextColor={COLORS.textLight}
-                  value={title}
-                  onChangeText={setTitle}
-                />
-              </>
-            )}
-
-            {/* Description */}
-            <Text style={styles.label}>Description *</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Describe your request in detail..."
-              placeholderTextColor={COLORS.textLight}
-              value={description}
-              onChangeText={setDescription}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-
-            {/* Contact Number */}
-            <Text style={styles.label}>Contact Number *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter contact number"
-              placeholderTextColor={COLORS.textLight}
-              value={contactNumber}
-              onChangeText={setContactNumber}
-              keyboardType="phone-pad"
-            />
+            {requestType === 'Petition' ? renderPetitionForm() : renderStandardForm()}
 
             {/* Submit Button */}
             <TouchableOpacity
@@ -297,7 +432,9 @@ export const RequestFormModal: React.FC<RequestFormModalProps> = ({
               {loading ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.submitBtnText}>Post Request</Text>
+                <Text style={styles.submitBtnText}>
+                  {requestType === 'Petition' ? 'Create Petition' : 'Post Request'}
+                </Text>
               )}
             </TouchableOpacity>
 
@@ -366,7 +503,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.divider,
   },
   textArea: {
-    height: 100,
+    height: 120,
     paddingTop: SPACING.md,
   },
   visibilityContainer: {
@@ -423,8 +560,8 @@ const styles = StyleSheet.create({
     borderColor: COLORS.divider,
   },
   bloodGroupBtnSelected: {
-    backgroundColor: COLORS.error,
-    borderColor: COLORS.error,
+    backgroundColor: '#E74C3C',
+    borderColor: '#E74C3C',
   },
   bloodGroupText: {
     fontSize: 14,
@@ -436,15 +573,16 @@ const styles = StyleSheet.create({
   },
   urgencyContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: SPACING.sm,
     marginBottom: SPACING.md,
   },
   urgencyBtn: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
     borderRadius: BORDER_RADIUS.md,
     backgroundColor: COLORS.background,
     borderWidth: 1,

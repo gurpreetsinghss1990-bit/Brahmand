@@ -37,7 +37,7 @@ from models.schemas import (
     CircleCreate, CircleJoin, CircleUpdate, CircleInvite, CirclePrivacy,
     HelpRequestCreate, HelpStatus, HelpUrgency, CommunityLevel,
     VendorCreate, VendorUpdate, CulturalCommunityUpdate,
-    SOSCreate, AstrologyProfile
+    SOSCreate, AstrologyProfile, CommunityRequestCreate, RequestType, RequestUrgency, VisibilityLevel
 )
 from middleware.security import verify_token, create_jwt_token
 from middleware.rate_limiter import auth_rate_limit, messaging_rate_limit
@@ -2701,6 +2701,148 @@ async def update_cultural_community(data: CulturalCommunityUpdate, token_data: d
         "change_count": new_count,
         "is_locked": new_count >= 2
     }
+
+
+# =================== COMMUNITY REQUESTS ===================
+
+@api_router.post("/community-requests")
+async def create_community_request(data: CommunityRequestCreate, token_data: dict = Depends(verify_token)):
+    """Create a community request (help, blood, medical, financial, petition)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
+    # Get user location info for visibility matching
+    location_area = user.get('home_location', {}) or user.get('location', {})
+    
+    request_data = {
+        "user_id": user_id,
+        "user_name": user.get('name'),
+        "user_photo": user.get('photo'),
+        "user_sl_id": user.get('sl_id'),
+        "user_phone": user.get('phone'),
+        "community_id": data.community_id,
+        "request_type": data.request_type.value,
+        "visibility_level": data.visibility_level.value,
+        "title": data.title,
+        "description": data.description,
+        "contact_number": data.contact_number,
+        "urgency_level": data.urgency_level.value,
+        "status": "active",
+        # Location data for filtering
+        "area": location_area.get('area') if location_area else None,
+        "city": location_area.get('city') if location_area else None,
+        "state": location_area.get('state') if location_area else None,
+        # Optional fields
+        "blood_group": data.blood_group,
+        "hospital_name": data.hospital_name,
+        "location": data.location,
+        "amount": data.amount,
+        "contact_person_name": data.contact_person_name,
+        "support_needed": data.support_needed,
+        "attachments": data.attachments or []
+    }
+    
+    request_id = await db.create_document('community_requests', request_data)
+    request_data['id'] = request_id
+    
+    logger.info(f"Community request created by {user_id}: {data.request_type.value} - {data.title}")
+    
+    return request_data
+
+
+@api_router.get("/community-requests")
+async def get_community_requests(
+    type: Optional[str] = None,
+    community_id: Optional[str] = None,
+    visibility_level: Optional[str] = None,
+    status: str = "active",
+    limit: int = 50,
+    token_data: dict = Depends(verify_token)
+):
+    """Get community requests with filters"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    user = await db.get_document('users', user_id)
+    
+    filters = [('status', '==', status)]
+    
+    if type:
+        filters.append(('request_type', '==', type))
+    
+    if community_id:
+        filters.append(('community_id', '==', community_id))
+    
+    # Filter by visibility based on user's location
+    location_area = user.get('location_area', {})
+    
+    requests = await db.query_documents('community_requests', filters=filters, limit=limit)
+    
+    # Filter requests based on visibility level
+    visible_requests = []
+    for req in requests:
+        visibility = req.get('visibility_level', 'area')
+        if visibility == 'national':
+            visible_requests.append(req)
+        elif visibility == 'state' and req.get('state') == location_area.get('state'):
+            visible_requests.append(req)
+        elif visibility == 'city' and req.get('city') == location_area.get('city'):
+            visible_requests.append(req)
+        elif visibility == 'area' and req.get('area') == location_area.get('area'):
+            visible_requests.append(req)
+    
+    return visible_requests
+
+
+@api_router.get("/community-requests/my")
+async def get_my_community_requests(token_data: dict = Depends(verify_token)):
+    """Get current user's community requests"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    requests = await db.query_documents('community_requests', filters=[
+        ('user_id', '==', user_id)
+    ])
+    
+    return requests
+
+
+@api_router.post("/community-requests/{request_id}/resolve")
+async def resolve_community_request(request_id: str, token_data: dict = Depends(verify_token)):
+    """Mark a community request as resolved (creator only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    request = await db.get_document('community_requests', request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    if request.get('user_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only the creator can resolve this request")
+    
+    await db.update_document('community_requests', request_id, {'status': 'resolved'})
+    logger.info(f"Community request {request_id} resolved by {user_id}")
+    
+    return {"message": "Request resolved successfully"}
+
+
+@api_router.delete("/community-requests/{request_id}")
+async def delete_community_request(request_id: str, token_data: dict = Depends(verify_token)):
+    """Delete a community request (creator only)"""
+    db = await get_db()
+    user_id = token_data["user_id"]
+    
+    request = await db.get_document('community_requests', request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    if request.get('user_id') != user_id:
+        raise HTTPException(status_code=403, detail="Only the creator can delete this request")
+    
+    await db.delete_document('community_requests', request_id)
+    logger.info(f"Community request {request_id} deleted by {user_id}")
+    
+    return {"message": "Request deleted successfully"}
 
 
 # =================== SOS EMERGENCY SYSTEM ===================

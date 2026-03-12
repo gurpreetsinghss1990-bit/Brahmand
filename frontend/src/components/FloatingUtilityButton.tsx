@@ -30,7 +30,7 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 // Panchang API
 const getPanchangData = async () => {
   try {
-    const response = await fetch('https://brahmand-vendors.preview.emergentagent.com/api/spiritual/panchang');
+    const response = await fetch('https://brahmand-requests.preview.emergentagent.com/api/spiritual/panchang');
     return await response.json();
   } catch (error) {
     console.error('Panchang error:', error);
@@ -41,7 +41,7 @@ const getPanchangData = async () => {
 // Festivals API
 const getFestivalsData = async () => {
   try {
-    const response = await fetch('https://brahmand-vendors.preview.emergentagent.com/api/spiritual/festivals?limit=1');
+    const response = await fetch('https://brahmand-requests.preview.emergentagent.com/api/spiritual/festivals?limit=1');
     const data = await response.json();
     return data?.[0] || null;
   } catch (error) {

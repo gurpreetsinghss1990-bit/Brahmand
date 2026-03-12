@@ -283,6 +283,42 @@ export const verifyHelpRequest = (requestId: string) =>
 export const deleteHelpRequest = (requestId: string) => 
   api.delete(`/help-requests/${requestId}`);
 
+// =================== COMMUNITY REQUESTS APIS ===================
+
+export const createCommunityRequest = (data: {
+  community_id?: string;
+  request_type: 'help' | 'blood' | 'medical' | 'financial' | 'petition';
+  visibility_level?: 'area' | 'city' | 'state' | 'national';
+  title: string;
+  description: string;
+  contact_number: string;
+  urgency_level?: 'low' | 'medium' | 'high' | 'critical';
+  blood_group?: string;
+  hospital_name?: string;
+  location?: string;
+  amount?: number;
+  contact_person_name?: string;
+  support_needed?: string;
+  attachments?: string[];
+}) => api.post('/community-requests', data);
+
+export const getCommunityRequests = (params?: {
+  type?: string;
+  community_id?: string;
+  visibility_level?: string;
+  status?: string;
+  limit?: number;
+}) => api.get('/community-requests', { params });
+
+export const getMyCommunityRequests = () => 
+  api.get('/community-requests/my');
+
+export const resolveCommunityRequest = (requestId: string) => 
+  api.post(`/community-requests/${requestId}/resolve`);
+
+export const deleteCommunityRequest = (requestId: string) => 
+  api.delete(`/community-requests/${requestId}`);
+
 // =================== VENDOR APIS ===================
 
 export const createVendor = (data: {

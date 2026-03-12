@@ -6,13 +6,15 @@ import {
   ScrollView, 
   TouchableOpacity, 
   RefreshControl,
-  FlatList 
+  FlatList,
+  Alert
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { getCommunities, getCommunityMessages } from '../../src/services/api';
+import { getCommunities, createCommunityRequest, getCommunityRequests } from '../../src/services/api';
 import { useAuthStore } from '../../src/store/authStore';
-import { COLORS, SPACING } from '../../src/constants/theme';
+import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
+import { RequestFormModal } from '../../src/components/RequestFormModal';
 
 const TABS = ['Chat', 'Help', 'Blood', 'Medical', 'Financial', 'Petition'];
 
@@ -25,29 +27,102 @@ interface Community {
   is_default?: boolean;
 }
 
+interface CommunityRequest {
+  id: string;
+  user_id: string;
+  user_name?: string;
+  request_type: string;
+  title: string;
+  description: string;
+  contact_number: string;
+  urgency_level: string;
+  status: string;
+  created_at: string;
+  blood_group?: string;
+  hospital_name?: string;
+  location?: string;
+  amount?: number;
+}
+
 export default function CommunityScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('Chat');
   const [communities, setCommunities] = useState<Community[]>([]);
+  const [requests, setRequests] = useState<CommunityRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestType, setRequestType] = useState<'Help' | 'Blood' | 'Medical' | 'Financial' | 'Petition'>('Help');
 
-  const fetchCommunities = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const res = await getCommunities();
-      setCommunities(res.data || []);
+      if (activeTab === 'Chat') {
+        // Fetch communities list
+        const res = await getCommunities();
+        setCommunities(res.data || []);
+        setRequests([]);
+      } else {
+        // Fetch community requests for this tab type
+        const requestTypeMap: Record<string, string> = {
+          'Help': 'help',
+          'Blood': 'blood',
+          'Medical': 'medical',
+          'Financial': 'financial',
+          'Petition': 'petition'
+        };
+        const response = await getCommunityRequests({
+          type: requestTypeMap[activeTab],
+          limit: 50
+        });
+        setRequests(response.data || []);
+      }
     } catch (error) {
-      console.error('Error fetching communities:', error);
+      console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [activeTab]);
 
   useEffect(() => {
-    fetchCommunities();
-  }, [fetchCommunities]);
+    fetchData();
+  }, [fetchData]);
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    // Automatically open form when tapping non-Chat tab
+    if (tab !== 'Chat') {
+      setRequestType(tab as any);
+      setShowRequestModal(true);
+    }
+  };
+
+  const handleSubmitRequest = async (data: any) => {
+    try {
+      await createCommunityRequest({
+        request_type: data.request_type,
+        visibility_level: data.visibility_level,
+        title: data.title,
+        description: data.description,
+        contact_number: data.contact_number,
+        urgency_level: data.urgency_level,
+        blood_group: data.blood_group,
+        hospital_name: data.hospital_name,
+        location: data.location,
+        amount: data.amount,
+        support_needed: data.support_needed,
+        contact_person_name: data.contact_person_name,
+      });
+      
+      Alert.alert('Success', 'Your request has been posted!');
+      fetchData();
+    } catch (error: any) {
+      console.error('Error submitting request:', error);
+      Alert.alert('Error', error.response?.data?.detail || 'Failed to submit request');
+      throw error;
+    }
+  };
 
   const getCommunityIcon = (type: string) => {
     switch (type) {
@@ -69,6 +144,26 @@ export default function CommunityScreen() {
       case 'country': return COLORS.primary;
       default: return COLORS.textSecondary;
     }
+  };
+
+  const getUrgencyColor = (urgency: string) => {
+    switch (urgency) {
+      case 'critical': return COLORS.error;
+      case 'high': return '#E67E22';
+      case 'medium': return COLORS.warning;
+      default: return COLORS.success;
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return date.toLocaleDateString();
   };
 
   const renderCommunity = ({ item }: { item: Community }) => (
@@ -97,6 +192,75 @@ export default function CommunityScreen() {
     </View>
   );
 
+  const renderRequest = ({ item }: { item: CommunityRequest }) => (
+    <View style={styles.requestCard}>
+      <View style={styles.requestHeader}>
+        <View style={styles.requestTypeContainer}>
+          <View style={[
+            styles.urgencyBadge,
+            { backgroundColor: `${getUrgencyColor(item.urgency_level)}20` }
+          ]}>
+            <View style={[styles.urgencyDot, { backgroundColor: getUrgencyColor(item.urgency_level) }]} />
+            <Text style={[styles.urgencyText, { color: getUrgencyColor(item.urgency_level) }]}>
+              {item.urgency_level.toUpperCase()}
+            </Text>
+          </View>
+          {item.request_type === 'blood' && item.blood_group && (
+            <View style={styles.bloodBadge}>
+              <Ionicons name="water" size={14} color="#E74C3C" />
+              <Text style={styles.bloodText}>{item.blood_group}</Text>
+            </View>
+          )}
+        </View>
+        <Text style={styles.requestDate}>{formatDate(item.created_at)}</Text>
+      </View>
+      
+      <Text style={styles.requestTitle}>{item.title}</Text>
+      <Text style={styles.requestDescription} numberOfLines={3}>{item.description}</Text>
+      
+      {item.hospital_name && (
+        <View style={styles.requestDetail}>
+          <Ionicons name="medical" size={14} color={COLORS.textSecondary} />
+          <Text style={styles.requestDetailText}>{item.hospital_name}</Text>
+        </View>
+      )}
+      
+      {item.location && (
+        <View style={styles.requestDetail}>
+          <Ionicons name="location" size={14} color={COLORS.textSecondary} />
+          <Text style={styles.requestDetailText}>{item.location}</Text>
+        </View>
+      )}
+      
+      {item.amount && (
+        <View style={styles.requestDetail}>
+          <Ionicons name="cash" size={14} color={COLORS.textSecondary} />
+          <Text style={styles.requestDetailText}>Rs {item.amount.toLocaleString()}</Text>
+        </View>
+      )}
+      
+      <View style={styles.requestFooter}>
+        <TouchableOpacity style={styles.contactButton}>
+          <Ionicons name="call" size={16} color={COLORS.primary} />
+          <Text style={styles.contactButtonText}>{item.contact_number}</Text>
+        </TouchableOpacity>
+        
+        {item.status === 'active' && (
+          <View style={styles.activeStatus}>
+            <View style={styles.activeDot} />
+            <Text style={styles.activeText}>Active</Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+
+  const handleAddRequest = () => {
+    if (activeTab === 'Chat') return;
+    setRequestType(activeTab as any);
+    setShowRequestModal(true);
+  };
+
   return (
     <View style={styles.container}>
       {/* Top Tabs */}
@@ -106,7 +270,7 @@ export default function CommunityScreen() {
             <TouchableOpacity
               key={tab}
               style={[styles.tab, activeTab === tab && styles.tabActive]}
-              onPress={() => setActiveTab(tab)}
+              onPress={() => handleTabChange(tab)}
             >
               <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
                 {tab}
@@ -114,27 +278,65 @@ export default function CommunityScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
-        <TouchableOpacity style={styles.addButton}>
-          <Ionicons name="add" size={24} color={COLORS.primary} />
-        </TouchableOpacity>
+        {activeTab !== 'Chat' && (
+          <TouchableOpacity style={styles.addButton} onPress={handleAddRequest}>
+            <Ionicons name="add" size={24} color={COLORS.primary} />
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* Community List */}
-      <FlatList
-        data={communities}
-        renderItem={renderCommunity}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchCommunities(); }} />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Ionicons name="people-outline" size={48} color={COLORS.textLight} />
-            <Text style={styles.emptyText}>No communities yet</Text>
-            <Text style={styles.emptySubtext}>Set up your location to join communities</Text>
-          </View>
-        }
+      {/* Content */}
+      {activeTab === 'Chat' ? (
+        // Community List
+        <FlatList
+          data={communities}
+          renderItem={renderCommunity}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Ionicons name="people-outline" size={48} color={COLORS.textLight} />
+              <Text style={styles.emptyText}>No communities yet</Text>
+              <Text style={styles.emptySubtext}>Set up your location to join communities</Text>
+            </View>
+          }
+        />
+      ) : (
+        // Request List
+        <FlatList
+          data={requests}
+          renderItem={renderRequest}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Ionicons name="document-text-outline" size={48} color={COLORS.textLight} />
+              <Text style={styles.emptyText}>No {activeTab.toLowerCase()} requests yet</Text>
+              <Text style={styles.emptySubtext}>Be the first to create a request</Text>
+              <TouchableOpacity 
+                style={styles.createRequestBtn}
+                onPress={handleAddRequest}
+              >
+                <Ionicons name="add-circle" size={20} color="#FFFFFF" />
+                <Text style={styles.createRequestBtnText}>Create {activeTab} Request</Text>
+              </TouchableOpacity>
+            </View>
+          }
+        />
+      )}
+
+      {/* Request Form Modal */}
+      <RequestFormModal
+        visible={showRequestModal}
+        onClose={() => setShowRequestModal(false)}
+        requestType={requestType}
+        onSubmit={handleSubmitRequest}
       />
     </View>
   );
@@ -233,5 +435,132 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     marginTop: SPACING.xs,
+  },
+  createRequestBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderRadius: 20,
+    marginTop: SPACING.lg,
+  },
+  createRequestBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    marginLeft: SPACING.xs,
+  },
+  // Request card styles
+  requestCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  requestHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  requestTypeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  urgencyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  urgencyDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 4,
+  },
+  urgencyText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  bloodBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FDEDEC',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  bloodText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#E74C3C',
+    marginLeft: 4,
+  },
+  requestDate: {
+    fontSize: 11,
+    color: COLORS.textLight,
+  },
+  requestTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: SPACING.xs,
+  },
+  requestDescription: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    lineHeight: 20,
+    marginBottom: SPACING.sm,
+  },
+  requestDetail: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  requestDetailText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginLeft: SPACING.xs,
+  },
+  requestFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: SPACING.sm,
+    paddingTop: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.divider,
+  },
+  contactButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.primary}10`,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: 20,
+  },
+  contactButtonText: {
+    color: COLORS.primary,
+    fontWeight: '600',
+    marginLeft: SPACING.xs,
+  },
+  activeStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  activeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.success,
+    marginRight: 4,
+  },
+  activeText: {
+    fontSize: 12,
+    color: COLORS.success,
+    fontWeight: '500',
   },
 });
