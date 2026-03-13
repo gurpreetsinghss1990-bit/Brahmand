@@ -16,7 +16,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getCommunity, getCommunityMessages, sendCommunityMessage, createCommunityRequest, getCommunityRequests } from '../../src/services/api';
+import { getCommunity, getCommunityMessages, sendCommunityMessage, createCommunityRequest, getCommunityRequests, getMyCommunityRequests, resolveCommunityRequest } from '../../src/services/api';
 import { useAuthStore } from '../../src/store/authStore';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 import { Avatar } from '../../src/components/Avatar';
@@ -130,10 +130,27 @@ export default function CommunityDetailScreen() {
     }
   };
 
-  const handleTabChange = (tab: string) => {
+  const handleTabChange = async (tab: string) => {
     setActiveTab(tab);
     // Automatically open form when tapping non-Chat tab
     if (tab !== 'Chat') {
+      // Check for existing active request before opening modal
+      try {
+        const response = await getMyCommunityRequests();
+        const myRequests = response.data || [];
+        const hasActive = myRequests.some((req: any) => req.status === 'active');
+        
+        if (hasActive) {
+          Alert.alert(
+            'Active Request Exists',
+            'You already have an active help request. Please mark it as fulfilled before creating a new one.'
+          );
+          return;
+        }
+      } catch (error) {
+        console.error('Error checking active requests:', error);
+      }
+      
       setRequestType(tab as any);
       setShowRequestModal(true);
     }
@@ -154,10 +171,52 @@ export default function CommunityDetailScreen() {
     }
   };
 
-  const handleAddRequest = () => {
+  const handleAddRequest = async () => {
     if (activeTab === 'Chat') return;
+    
+    // Check for existing active request before opening modal
+    try {
+      const response = await getMyCommunityRequests();
+      const myRequests = response.data || [];
+      const hasActive = myRequests.some((req: any) => req.status === 'active');
+      
+      if (hasActive) {
+        Alert.alert(
+          'Active Request Exists',
+          'You already have an active help request. Please mark it as fulfilled before creating a new one.'
+        );
+        return;
+      }
+    } catch (error) {
+      console.error('Error checking active requests:', error);
+    }
+    
     setRequestType(activeTab as any);
     setShowRequestModal(true);
+  };
+
+  const handleResolveRequest = async (requestId: string) => {
+    Alert.alert(
+      'Mark as Fulfilled',
+      'Are you sure you want to mark this request as fulfilled?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          onPress: async () => {
+            try {
+              await resolveCommunityRequest(requestId);
+              Alert.alert('Success', 'Request marked as fulfilled!');
+              // Refresh the request list
+              fetchData();
+            } catch (error: any) {
+              console.error('Error resolving request:', error);
+              Alert.alert('Error', error.response?.data?.detail || 'Failed to resolve request');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleSubmitRequest = async (data: any) => {
@@ -311,7 +370,17 @@ export default function CommunityDetailScreen() {
             <Text style={styles.contactButtonText}>{item.contact_number}</Text>
           </TouchableOpacity>
           
-          {item.status === 'active' && (
+          {item.status === 'active' && isOwn && (
+            <TouchableOpacity 
+              style={styles.fulfillButton}
+              onPress={() => handleResolveRequest(item.id)}
+            >
+              <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
+              <Text style={styles.fulfillButtonText}>Mark Fulfilled</Text>
+            </TouchableOpacity>
+          )}
+          
+          {item.status === 'active' && !isOwn && (
             <View style={styles.activeStatus}>
               <View style={styles.activeDot} />
               <Text style={styles.activeText}>Active</Text>
@@ -790,5 +859,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.success,
     fontWeight: '500',
+  },
+  fulfillButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.success}15`,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: 20,
+  },
+  fulfillButtonText: {
+    color: COLORS.success,
+    fontWeight: '600',
+    marginLeft: SPACING.xs,
+    fontSize: 12,
   },
 });
