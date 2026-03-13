@@ -2712,6 +2712,18 @@ async def create_community_request(data: CommunityRequestCreate, token_data: dic
     user_id = token_data["user_id"]
     user = await db.get_document('users', user_id)
     
+    # CHECK: User can only have ONE active request at a time
+    existing_active = await db.find_one('community_requests', [
+        ('user_id', '==', user_id),
+        ('status', '==', 'active')
+    ])
+    
+    if existing_active:
+        raise HTTPException(
+            status_code=400, 
+            detail="You already have an active request. Please mark it as fulfilled before creating a new one."
+        )
+    
     # Get user location info for visibility matching
     location_area = user.get('home_location', {}) or user.get('location', {})
     
