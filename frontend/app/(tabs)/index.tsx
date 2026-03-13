@@ -11,9 +11,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { getCommunities, createCommunityRequest, getCommunityRequests, createHelpRequest } from '../../src/services/api';
+import { getCommunities, createCommunityRequest, getCommunityRequests } from '../../src/services/api';
 import { useAuthStore } from '../../src/store/authStore';
-import { useHelpRequestStore } from '../../src/store/helpRequestStore';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 import { RequestFormModal } from '../../src/components/RequestFormModal';
 
@@ -107,7 +106,7 @@ export default function CommunityScreen() {
       const title = data.title || `${data.request_type} Request`;
       const description = data.description || 'Request created from community tab';
       
-      // Create in community_requests system (for community tab feeds)
+      // Create community request via API
       await createCommunityRequest({
         request_type: data.request_type,
         visibility_level: data.visibility_level || 'area',
@@ -122,23 +121,6 @@ export default function CommunityScreen() {
         support_needed: data.support_needed,
         contact_person_name: data.contact_person_name,
       });
-      
-      // Also create in help_requests system (for floating button to show active request)
-      const helpRequestType = data.request_type === 'petition' ? 'other' : data.request_type;
-      await createHelpRequest({
-        type: helpRequestType,
-        title: title.length >= 2 ? title : `${data.request_type} Request`,
-        description: description.length >= 10 ? description : description.padEnd(10, '.'),
-        contact_number: data.contact_number,
-        urgency: data.urgency_level === 'critical' ? 'critical' : (data.urgency_level === 'high' ? 'urgent' : 'normal'),
-        community_level: data.visibility_level || 'area',
-        blood_group: data.blood_group,
-        hospital_name: data.hospital_name,
-        amount: data.amount,
-      });
-      
-      // Refresh the help request store so floating button updates
-      useHelpRequestStore.getState().fetchActiveRequest();
       
       Alert.alert('Success', 'Your request has been posted!');
       fetchData();

@@ -16,9 +16,8 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getCommunity, getCommunityMessages, sendCommunityMessage, createCommunityRequest, getCommunityRequests, createHelpRequest } from '../../src/services/api';
+import { getCommunity, getCommunityMessages, sendCommunityMessage, createCommunityRequest, getCommunityRequests } from '../../src/services/api';
 import { useAuthStore } from '../../src/store/authStore';
-import { useHelpRequestStore } from '../../src/store/helpRequestStore';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 import { Avatar } from '../../src/components/Avatar';
 import { RequestFormModal } from '../../src/components/RequestFormModal';
@@ -169,7 +168,7 @@ export default function CommunityDetailScreen() {
       const title = data.title || `${data.request_type} Request`;
       const description = data.description || 'Request created from community tab';
       
-      // Create in community_requests system (for community tab feeds)
+      // Create community request via API
       await createCommunityRequest({
         community_id: id,
         request_type: data.request_type,
@@ -185,23 +184,6 @@ export default function CommunityDetailScreen() {
         support_needed: data.support_needed,
         contact_person_name: data.contact_person_name,
       });
-      
-      // Also create in help_requests system (for floating button to show active request)
-      const helpRequestType = data.request_type === 'petition' ? 'other' : data.request_type;
-      await createHelpRequest({
-        type: helpRequestType,
-        title: title.length >= 2 ? title : `${data.request_type} Request`,
-        description: description.length >= 10 ? description : description.padEnd(10, '.'),
-        contact_number: data.contact_number,
-        urgency: data.urgency_level === 'critical' ? 'critical' : (data.urgency_level === 'high' ? 'urgent' : 'normal'),
-        community_level: data.visibility_level || 'area',
-        blood_group: data.blood_group,
-        hospital_name: data.hospital_name,
-        amount: data.amount,
-      });
-      
-      // Refresh the help request store so floating button updates
-      useHelpRequestStore.getState().fetchActiveRequest();
       
       Alert.alert('Success', 'Your request has been posted!');
       // Refresh the data to show the new request
