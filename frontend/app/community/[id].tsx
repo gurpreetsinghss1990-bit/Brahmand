@@ -196,6 +196,9 @@ export default function CommunityDetailScreen() {
   };
 
   const handleResolveRequest = async (requestId: string) => {
+    console.log('=== handleResolveRequest called ===');
+    console.log('Request ID:', requestId);
+    
     Alert.alert(
       'Mark as Fulfilled',
       'Are you sure you want to mark this request as fulfilled?',
@@ -204,13 +207,16 @@ export default function CommunityDetailScreen() {
         {
           text: 'Confirm',
           onPress: async () => {
+            console.log('=== Confirm pressed, calling API ===');
             try {
-              await resolveCommunityRequest(requestId);
+              const response = await resolveCommunityRequest(requestId);
+              console.log('=== API Response ===', response);
               Alert.alert('Success', 'Request marked as fulfilled!');
               // Refresh the request list
+              console.log('=== Refreshing data ===');
               fetchData();
             } catch (error: any) {
-              console.error('Error resolving request:', error);
+              console.error('=== Error resolving request ===', error);
               Alert.alert('Error', error.response?.data?.detail || 'Failed to resolve request');
             }
           }
@@ -316,6 +322,11 @@ export default function CommunityDetailScreen() {
 
   const renderRequest = ({ item }: { item: CommunityRequest }) => {
     const isOwn = item.user_id === user?.id;
+    console.log('=== renderRequest ===');
+    console.log('item.user_id:', item.user_id);
+    console.log('user?.id:', user?.id);
+    console.log('isOwn:', isOwn);
+    console.log('item.status:', item.status);
     
     return (
       <View style={styles.requestCard}>
@@ -370,21 +381,17 @@ export default function CommunityDetailScreen() {
             <Text style={styles.contactButtonText}>{item.contact_number}</Text>
           </TouchableOpacity>
           
-          {item.status === 'active' && isOwn && (
+          {item.status === 'active' && (
             <TouchableOpacity 
               style={styles.fulfillButton}
-              onPress={() => handleResolveRequest(item.id)}
+              onPress={() => {
+                console.log('=== Button pressed for request:', item.id);
+                handleResolveRequest(item.id);
+              }}
             >
               <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
               <Text style={styles.fulfillButtonText}>Mark Fulfilled</Text>
             </TouchableOpacity>
-          )}
-          
-          {item.status === 'active' && !isOwn && (
-            <View style={styles.activeStatus}>
-              <View style={styles.activeDot} />
-              <Text style={styles.activeText}>Active</Text>
-            </View>
           )}
         </View>
       </View>
