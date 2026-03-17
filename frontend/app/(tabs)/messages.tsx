@@ -1,128 +1,340 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  FlatList, 
-  TouchableOpacity, 
-  RefreshControl, 
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  FlatList,
+  RefreshControl,
   ActivityIndicator,
-  Modal 
+  ScrollView,
+  Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { getConversations } from '../../src/services/api';
-import { Conversation } from '../../src/types';
-import { Avatar } from '../../src/components/Avatar';
-import { useAuthStore } from '../../src/store/authStore';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
+import { useAuthStore } from '../../src/store/authStore';
+import { getCircles, getCommunities, createCommunityRequest, getCommunityRequests, getMyCommunityRequests, resolveCommunityRequest } from '../../src/services/api';
+import { RequestFormModal } from '../../src/components/RequestFormModal';
 
-interface ConversationWithStatus extends Conversation {
-  last_message_status?: 'delivered' | 'read';
-  last_message_sender_id?: string;
+// Top tabs for Chat section
+const TOP_TABS = ['Community', 'Private Chat'];
+
+// Community sub-tabs
+const COMMUNITY_TABS = ['Chat', 'Help', 'Blood', 'Medical', 'Financial', 'Petition'];
+
+interface Circle {
+  id: string;
+  name: string;
+  description?: string;
+  member_count: number;
+  last_message?: string;
+  last_message_time?: string;
+}
+
+interface Community {
+  id: string;
+  name: string;
+  type: string;
+  label?: string;
+  member_count: number;
+  is_default?: boolean;
+}
+
+interface CommunityRequest {
+  id: string;
+  user_id: string;
+  request_type: string;
+  title: string;
+  description: string;
+  contact_number: string;
+  urgency_level: string;
+  status: string;
+  created_at: string;
+  blood_group?: string;
+  hospital_name?: string;
+  amount?: number;
 }
 
 export default function MessagesScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const [conversations, setConversations] = useState<ConversationWithStatus[]>([]);
+  
+  // Top tab state (Community vs Private Chat)
+  const [activeTopTab, setActiveTopTab] = useState('Community');
+  
+  // Community sub-tab state
+  const [activeCommunityTab, setActiveCommunityTab] = useState('Chat');
+  
+  // Data states
+  const [communities, setCommunities] = useState<Community[]>([]);
+  const [circles, setCircles] = useState<Circle[]>([]);
+  const [requests, setRequests] = useState<CommunityRequest[]>([]);
+  
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [showCreateMenu, setShowCreateMenu] = useState(false);
+  
+  // Request form modal
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestType, setRequestType] = useState<'Help' | 'Blood' | 'Medical' | 'Financial' | 'Petition'>('Help');
 
-  const fetchConversations = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const response = await getConversations();
-      setConversations(response.data);
+      if (activeTopTab === 'Community') {
+        if (activeCommunityTab === 'Chat') {
+          // Fetch communities list
+          const res = await getCommunities();
+          setCommunities(res.data || []);
+          setRequests([]);
+        } else {
+          // Fetch community requests for this tab type
+          const requestTypeMap: Record<string, string> = {
+            'Help': 'help',
+            'Blood': 'blood',
+            'Medical': 'medical',
+            'Financial': 'financial',
+            'Petition': 'petition'
+          };
+          const response = await getCommunityRequests({
+            type: requestTypeMap[activeCommunityTab],
+            limit: 50
+          });
+          setRequests(response.data || []);
+        }
+      } else {
+        // Private Chat - fetch circles/groups
+        const res = await getCircles();
+        setCircles(res.data || []);
+      }
     } catch (error) {
-      console.error('Error fetching conversations:', error);
+      console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [activeTopTab, activeCommunityTab]);
 
   useEffect(() => {
-    fetchConversations();
-    const interval = setInterval(fetchConversations, 5000);
-    return () => clearInterval(interval);
-  }, [fetchConversations]);
+    fetchData();
+  }, [fetchData]);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchConversations();
-  };
-
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    
-    if (days === 0) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else if (days === 1) {
-      return 'Yesterday';
-    } else if (days < 7) {
-      return date.toLocaleDateString([], { weekday: 'short' });
-    } else {
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  const handleCommunityTabChange = async (tab: string) => {
+    setActiveCommunityTab(tab);
+    if (tab !== 'Chat') {
+      // Check for existing active request before opening modal
+      try {
+        const response = await getMyCommunityRequests();
+        const myRequests = response.data || [];
+        const hasActive = myRequests.some((req: any) => req.status === 'active');
+        
+        if (hasActive) {
+          Alert.alert(
+            'Active Request Exists',
+            'You already have an active help request. Please mark it as fulfilled before creating a new one.'
+          );
+          return;
+        }
+      } catch (error) {
+        console.error('Error checking active requests:', error);
+      }
+      
+      setRequestType(tab as any);
+      setShowRequestModal(true);
     }
   };
 
-  const MessageStatus = ({ status, isSentByMe }: { status?: string; isSentByMe: boolean }) => {
-    if (!isSentByMe) return null;
-    
-    if (status === 'read') {
-      return <Ionicons name="checkmark-done" size={16} color={COLORS.primary} style={styles.statusIcon} />;
+  const handleSubmitRequest = async (data: any) => {
+    try {
+      const title = data.title || `${data.request_type} Request`;
+      const description = data.description || 'Request created from community tab';
+      
+      await createCommunityRequest({
+        request_type: data.request_type,
+        visibility_level: data.visibility_level || 'area',
+        title: title.length >= 2 ? title : `${data.request_type} Request`,
+        description: description.length >= 10 ? description : description.padEnd(10, '.'),
+        contact_number: data.contact_number,
+        urgency_level: data.urgency_level || 'low',
+        blood_group: data.blood_group,
+        hospital_name: data.hospital_name,
+        location: data.location,
+        amount: data.amount,
+        support_needed: data.support_needed,
+        contact_person_name: data.contact_person_name,
+      });
+      
+      Alert.alert('Success', 'Your request has been posted!');
+      fetchData();
+    } catch (error: any) {
+      console.error('Error submitting request:', error);
+      Alert.alert('Error', error.response?.data?.detail || 'Failed to submit request');
+      throw error;
     }
-    return <Ionicons name="checkmark" size={16} color={COLORS.textLight} style={styles.statusIcon} />;
   };
 
-  const handleCreateOption = (option: string) => {
-    setShowCreateMenu(false);
-    switch (option) {
-      case 'message':
-        router.push('/dm/new');
-        break;
-      case 'circle':
-        router.push('/circle/create');
-        break;
-    }
-  };
-
-  const renderConversation = ({ item }: { item: ConversationWithStatus }) => {
-    const isSentByMe = item.last_message_sender_id === user?.id;
-    
-    return (
-      <TouchableOpacity
-        style={styles.conversationCard}
-        onPress={() => router.push(`/dm/${item.conversation_id || item.chat_id}`)}
-        activeOpacity={0.7}
-      >
-        <Avatar name={item.user.name} photo={item.user.photo} size={50} />
-        <View style={styles.conversationInfo}>
-          <View style={styles.conversationHeader}>
-            <Text style={styles.userName}>{item.user.name}</Text>
-            {item.last_message_at && (
-              <Text style={styles.timeText}>{formatTime(item.last_message_at)}</Text>
-            )}
-          </View>
-          <Text style={styles.slId}>{item.user.sl_id}</Text>
-          {item.last_message && (
-            <View style={styles.lastMessageRow}>
-              {isSentByMe && (
-                <MessageStatus status={item.last_message_status} isSentByMe={true} />
-              )}
-              <Text style={styles.lastMessage} numberOfLines={1}>
-                {isSentByMe ? 'You: ' : ''}{item.last_message}
-              </Text>
-            </View>
-          )}
-        </View>
-      </TouchableOpacity>
+  const handleResolveRequest = async (requestId: string) => {
+    Alert.alert(
+      'Mark as Fulfilled',
+      'Are you sure you want to mark this request as fulfilled?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          onPress: async () => {
+            try {
+              await resolveCommunityRequest(requestId);
+              Alert.alert('Success', 'Request marked as fulfilled!');
+              fetchData();
+            } catch (error: any) {
+              console.error('Error resolving request:', error);
+              Alert.alert('Error', error.response?.data?.detail || 'Failed to resolve request');
+            }
+          }
+        }
+      ]
     );
   };
+
+  const getCommunityIcon = (type: string) => {
+    switch (type) {
+      case 'home_area': return 'home';
+      case 'office_area': return 'business';
+      case 'city': return 'location';
+      case 'state': return 'map';
+      case 'country': return 'flag';
+      default: return 'people';
+    }
+  };
+
+  const getCommunityColor = (type: string) => {
+    switch (type) {
+      case 'home_area': return COLORS.success;
+      case 'office_area': return COLORS.info;
+      case 'city': return '#9B59B6';
+      case 'state': return COLORS.warning;
+      case 'country': return COLORS.primary;
+      default: return COLORS.textSecondary;
+    }
+  };
+
+  const getUrgencyColor = (urgency: string) => {
+    switch (urgency) {
+      case 'critical': return COLORS.error;
+      case 'high': return '#E67E22';
+      case 'medium': return COLORS.warning;
+      default: return COLORS.success;
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return date.toLocaleDateString();
+  };
+
+  const renderCommunity = ({ item }: { item: Community }) => (
+    <View>
+      {item.label && (
+        <Text style={[styles.communityLabel, { color: getCommunityColor(item.type) }]}>
+          {item.label}
+        </Text>
+      )}
+      <TouchableOpacity
+        style={styles.communityCard}
+        onPress={() => router.push(`/community/${item.id}`)}
+      >
+        <View style={[styles.communityIcon, { backgroundColor: `${getCommunityColor(item.type)}15` }]}>
+          <Ionicons name={getCommunityIcon(item.type)} size={24} color={getCommunityColor(item.type)} />
+        </View>
+        <View style={styles.communityInfo}>
+          <Text style={styles.communityName}>{item.name}</Text>
+          <Text style={styles.communityStats}>{item.member_count} members</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderCircle = ({ item }: { item: Circle }) => (
+    <TouchableOpacity
+      style={styles.circleCard}
+      onPress={() => router.push(`/circle/${item.id}`)}
+    >
+      <View style={styles.circleAvatar}>
+        <Ionicons name="people" size={24} color={COLORS.primary} />
+      </View>
+      <View style={styles.circleInfo}>
+        <Text style={styles.circleName}>{item.name}</Text>
+        <Text style={styles.circleLastMessage} numberOfLines={1}>
+          {item.last_message || 'No messages yet'}
+        </Text>
+      </View>
+      <View style={styles.circleRight}>
+        <Text style={styles.circleTime}>{item.last_message_time || ''}</Text>
+        <Text style={styles.circleMemberCount}>{item.member_count} members</Text>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderRequest = ({ item }: { item: CommunityRequest }) => (
+    <View style={styles.requestCard}>
+      <View style={styles.requestHeader}>
+        <View style={[
+          styles.urgencyBadge,
+          { backgroundColor: `${getUrgencyColor(item.urgency_level)}20` }
+        ]}>
+          <View style={[styles.urgencyDot, { backgroundColor: getUrgencyColor(item.urgency_level) }]} />
+          <Text style={[styles.urgencyText, { color: getUrgencyColor(item.urgency_level) }]}>
+            {item.urgency_level.toUpperCase()}
+          </Text>
+        </View>
+        <Text style={styles.requestDate}>{formatDate(item.created_at)}</Text>
+      </View>
+      
+      <Text style={styles.requestTitle}>{item.title}</Text>
+      <Text style={styles.requestDescription} numberOfLines={2}>{item.description}</Text>
+      
+      <View style={styles.requestFooter}>
+        <TouchableOpacity style={styles.contactButton}>
+          <Ionicons name="call" size={14} color={COLORS.primary} />
+          <Text style={styles.contactButtonText}>{item.contact_number}</Text>
+        </TouchableOpacity>
+        
+        {item.status === 'active' && (
+          <TouchableOpacity 
+            style={styles.fulfillButton}
+            onPress={() => handleResolveRequest(item.id)}
+          >
+            <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />
+            <Text style={styles.fulfillButtonText}>Fulfilled</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+
+  const renderEmptyPrivateChat = () => (
+    <View style={styles.emptyState}>
+      <View style={styles.emptyIconContainer}>
+        <Ionicons name="chatbubble-ellipses" size={48} color={COLORS.textLight} />
+      </View>
+      <Text style={styles.emptyTitle}>Private Chats</Text>
+      <Text style={styles.emptyText}>Your private conversations and group chats will appear here</Text>
+      <TouchableOpacity 
+        style={styles.createButton}
+        onPress={() => router.push('/create-circle')}
+      >
+        <Ionicons name="add-circle" size={20} color="#FFFFFF" />
+        <Text style={styles.createButtonText}>Create Group</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   if (loading) {
     return (
@@ -133,89 +345,124 @@ export default function MessagesScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      {/* Header with + Create Button */}
-      <View style={styles.headerContainer}>
-        <Text style={styles.headerTitle}>Messages</Text>
-        <TouchableOpacity 
-          style={styles.createButton}
-          onPress={() => setShowCreateMenu(true)}
-        >
-          <Ionicons name="add" size={20} color={COLORS.primary} />
-          <Text style={styles.createButtonText}>Create</Text>
-        </TouchableOpacity>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      {/* Top Tabs: Community | Private Chat */}
+      <View style={styles.topTabsContainer}>
+        {TOP_TABS.map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            style={[styles.topTab, activeTopTab === tab && styles.topTabActive]}
+            onPress={() => setActiveTopTab(tab)}
+          >
+            <Text style={[styles.topTabText, activeTopTab === tab && styles.topTabTextActive]}>
+              {tab}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      {conversations.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="chatbubbles-outline" size={64} color={COLORS.textLight} />
-          <Text style={styles.emptyTitle}>No Messages Yet</Text>
-          <Text style={styles.emptyText}>
-            Start a conversation by entering someone's Brahmand ID
-          </Text>
-          <TouchableOpacity 
-            style={styles.startChatButton}
-            onPress={() => router.push('/dm/new')}
-          >
-            <Ionicons name="add-circle" size={20} color="#FFFFFF" />
-            <Text style={styles.startChatText}>New Message</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
+      {/* Community Tab Content */}
+      {activeTopTab === 'Community' && (
+        <>
+          {/* Community Sub-tabs */}
+          <View style={styles.subTabsContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {COMMUNITY_TABS.map((tab) => (
+                <TouchableOpacity
+                  key={tab}
+                  style={[styles.subTab, activeCommunityTab === tab && styles.subTabActive]}
+                  onPress={() => handleCommunityTabChange(tab)}
+                >
+                  <Text style={[styles.subTabText, activeCommunityTab === tab && styles.subTabTextActive]}>
+                    {tab}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            {activeCommunityTab !== 'Chat' && (
+              <TouchableOpacity 
+                style={styles.addButton} 
+                onPress={() => {
+                  setRequestType(activeCommunityTab as any);
+                  setShowRequestModal(true);
+                }}
+              >
+                <Ionicons name="add" size={24} color={COLORS.primary} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Community Content */}
+          {activeCommunityTab === 'Chat' ? (
+            <FlatList
+              data={communities}
+              renderItem={renderCommunity}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.listContent}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} />
+              }
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Ionicons name="people-outline" size={48} color={COLORS.textLight} />
+                  <Text style={styles.emptyTitle}>No Communities</Text>
+                  <Text style={styles.emptyText}>Set up your location to join communities</Text>
+                </View>
+              }
+            />
+          ) : (
+            <FlatList
+              data={requests}
+              renderItem={renderRequest}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.listContent}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} />
+              }
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Ionicons name="document-text-outline" size={48} color={COLORS.textLight} />
+                  <Text style={styles.emptyTitle}>No {activeCommunityTab} Requests</Text>
+                  <Text style={styles.emptyText}>Be the first to create a request</Text>
+                  <TouchableOpacity 
+                    style={styles.createButton}
+                    onPress={() => {
+                      setRequestType(activeCommunityTab as any);
+                      setShowRequestModal(true);
+                    }}
+                  >
+                    <Ionicons name="add-circle" size={20} color="#FFFFFF" />
+                    <Text style={styles.createButtonText}>Create {activeCommunityTab} Request</Text>
+                  </TouchableOpacity>
+                </View>
+              }
+            />
+          )}
+        </>
+      )}
+
+      {/* Private Chat Tab Content */}
+      {activeTopTab === 'Private Chat' && (
         <FlatList
-          data={conversations}
-          renderItem={renderConversation}
-          keyExtractor={(item) => item.conversation_id}
+          data={circles}
+          renderItem={renderCircle}
+          keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />
+            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} />
           }
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ListEmptyComponent={renderEmptyPrivateChat}
         />
       )}
 
-      {/* Create Menu Modal - Only New Message and New Circle */}
-      <Modal
-        visible={showCreateMenu}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowCreateMenu(false)}
-      >
-        <TouchableOpacity 
-          style={styles.menuOverlay}
-          activeOpacity={1}
-          onPress={() => setShowCreateMenu(false)}
-        >
-          <View style={styles.menuContent}>
-            <TouchableOpacity 
-              style={styles.menuItem}
-              onPress={() => handleCreateOption('message')}
-            >
-              <View style={[styles.menuIconBg, { backgroundColor: `${COLORS.primary}15` }]}>
-                <Ionicons name="chatbubble" size={20} color={COLORS.primary} />
-              </View>
-              <View style={styles.menuItemInfo}>
-                <Text style={styles.menuItemTitle}>New Message</Text>
-                <Text style={styles.menuItemSubtitle}>Start a private conversation</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.menuItem}
-              onPress={() => handleCreateOption('circle')}
-            >
-              <View style={[styles.menuIconBg, { backgroundColor: `${COLORS.info}15` }]}>
-                <Ionicons name="ellipse-outline" size={20} color={COLORS.info} />
-              </View>
-              <View style={styles.menuItemInfo}>
-                <Text style={styles.menuItemTitle}>New Circle</Text>
-                <Text style={styles.menuItemSubtitle}>Create a trusted private group</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-    </View>
+      {/* Request Form Modal */}
+      <RequestFormModal
+        visible={showRequestModal}
+        onClose={() => setShowRequestModal(false)}
+        requestType={requestType}
+        onSubmit={handleSubmitRequest}
+      />
+    </SafeAreaView>
   );
 }
 
@@ -230,153 +477,269 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.background,
   },
-  headerContainer: {
+  // Top Tabs (Community | Private Chat)
+  topTabsContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: SPACING.md,
     backgroundColor: COLORS.surface,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.divider,
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  createButton: {
-    flexDirection: 'row',
+  topTab: {
+    flex: 1,
+    paddingVertical: SPACING.md,
     alignItems: 'center',
-    backgroundColor: `${COLORS.primary}15`,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: 20,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  createButtonText: {
+  topTabActive: {
+    borderBottomColor: COLORS.primary,
+  },
+  topTabText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: COLORS.textSecondary,
+  },
+  topTabTextActive: {
     color: COLORS.primary,
     fontWeight: '600',
-    marginLeft: 4,
+  },
+  // Sub Tabs (Chat | Help | Blood...)
+  subTabsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+    paddingVertical: SPACING.sm,
+  },
+  subTab: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    marginLeft: SPACING.sm,
+    borderRadius: 20,
+  },
+  subTabActive: {
+    backgroundColor: `${COLORS.primary}15`,
+  },
+  subTabText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
+  subTabTextActive: {
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  addButton: {
+    padding: SPACING.sm,
+    marginRight: SPACING.sm,
   },
   listContent: {
     padding: SPACING.md,
+    paddingBottom: 100,
   },
-  conversationCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
-  },
-  conversationInfo: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  conversationHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  userName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  timeText: {
+  // Community Card
+  communityLabel: {
     fontSize: 11,
-    color: COLORS.textLight,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+    marginLeft: 4,
   },
-  slId: {
-    fontSize: 12,
-    color: COLORS.primary,
-    marginTop: 2,
-  },
-  lastMessage: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginTop: 4,
-    flex: 1,
-  },
-  lastMessageRow: {
+  communityCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
-  },
-  statusIcon: {
-    marginRight: 4,
-  },
-  separator: {
-    height: SPACING.sm,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: SPACING.xl,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginTop: SPACING.lg,
-    marginBottom: SPACING.sm,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginBottom: SPACING.lg,
-  },
-  startChatButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  startChatText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    marginLeft: SPACING.xs,
-  },
-  menuOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  menuContent: {
     backgroundColor: COLORS.surface,
-    borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.md,
-    width: '85%',
-    maxWidth: 340,
+    borderRadius: 16,
+    marginBottom: 12,
   },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  menuIconBg: {
-    width: 44,
-    height: 44,
+  communityIcon: {
+    width: 48,
+    height: 48,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: SPACING.md,
   },
-  menuItemInfo: {
+  communityInfo: {
     flex: 1,
   },
-  menuItemTitle: {
+  communityName: {
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.text,
   },
-  menuItemSubtitle: {
-    fontSize: 12,
+  communityStats: {
+    fontSize: 13,
     color: COLORS.textSecondary,
     marginTop: 2,
+  },
+  // Circle Card
+  circleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    padding: SPACING.md,
+    borderRadius: 16,
+    marginBottom: 12,
+  },
+  circleAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: `${COLORS.primary}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.md,
+  },
+  circleInfo: {
+    flex: 1,
+  },
+  circleName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  circleLastMessage: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  circleRight: {
+    alignItems: 'flex-end',
+  },
+  circleTime: {
+    fontSize: 11,
+    color: COLORS.textLight,
+  },
+  circleMemberCount: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  // Request Card
+  requestCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  requestHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  urgencyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  urgencyDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 4,
+  },
+  urgencyText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  requestDate: {
+    fontSize: 11,
+    color: COLORS.textLight,
+  },
+  requestTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: SPACING.xs,
+  },
+  requestDescription: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    lineHeight: 18,
+    marginBottom: SPACING.sm,
+  },
+  requestFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.divider,
+  },
+  contactButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.primary}10`,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  contactButtonText: {
+    color: COLORS.primary,
+    fontWeight: '600',
+    marginLeft: 4,
+    fontSize: 12,
+  },
+  fulfillButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.success}15`,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  fulfillButtonText: {
+    color: COLORS.success,
+    fontWeight: '600',
+    marginLeft: 4,
+    fontSize: 12,
+  },
+  // Empty State
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: SPACING.xl * 2,
+  },
+  emptyIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: `${COLORS.primary}10`,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginTop: SPACING.md,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.xs,
+    textAlign: 'center',
+    paddingHorizontal: SPACING.xl,
+  },
+  createButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderRadius: 20,
+    marginTop: SPACING.lg,
+  },
+  createButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    marginLeft: SPACING.xs,
   },
 });

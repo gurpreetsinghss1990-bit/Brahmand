@@ -39,34 +39,19 @@ export default function TabLayout() {
         headerShadowVisible: false,
       }}
     >
+      {/* 1. Photo/Video Feed - First Position */}
       <Tabs.Screen
-        name="index"
+        name="feed"
         options={{
-          title: 'Community',
-          headerTitle: 'Brahmand',
+          title: 'Feed',
+          headerTitle: 'Feed',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="people" color={color} focused={focused} />
+            <TabIcon name="play-circle" color={color} focused={focused} />
           ),
         }}
       />
-      <Tabs.Screen
-        name="temple"
-        options={{
-          title: 'Temple',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="home" color={color} focused={focused} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="messages"
-        options={{
-          title: 'Chat',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="chatbubbles" color={color} focused={focused} />
-          ),
-        }}
-      />
+      
+      {/* 2. Vendor */}
       <Tabs.Screen
         name="vendor"
         options={{
@@ -76,16 +61,43 @@ export default function TabLayout() {
           ),
         }}
       />
+      
+      {/* 3. Chat (contains Community & Private Chat tabs) */}
       <Tabs.Screen
-        name="profile"
+        name="messages"
         options={{
-          title: 'Profile',
+          title: 'Chat',
+          headerTitle: 'Chat',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="person" color={color} focused={focused} />
+            <TabIcon name="chatbubbles" color={color} focused={focused} />
           ),
         }}
       />
+      
+      {/* 4. Temple */}
+      <Tabs.Screen
+        name="temple"
+        options={{
+          title: 'Temple',
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="home" color={color} focused={focused} />
+          ),
+        }}
+      />
+      
+      {/* 5. Settings/Profile */}
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Settings',
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="settings" color={color} focused={focused} />
+          ),
+        }}
+      />
+      
       {/* Hide these screens from tab bar */}
+      <Tabs.Screen name="index" options={{ href: null }} />
       <Tabs.Screen name="circles" options={{ href: null }} />
       <Tabs.Screen name="discover" options={{ href: null }} />
     </Tabs>
