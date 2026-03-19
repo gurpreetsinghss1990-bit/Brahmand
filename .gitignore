@@ -79,3 +79,7 @@ agenthub/agents/youtube/db
 # Mobile development
 android-sdk/ brahmand.zip
 brahmand.zip
+-e 
+# Environment files
+*.env
+*.env.*
