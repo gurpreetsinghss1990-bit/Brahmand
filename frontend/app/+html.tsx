@@ -1,0 +1,122 @@
+// @ts-nocheck
+import { ScrollViewStyleReset } from "expo-router/html";
+import type { PropsWithChildren } from "react";
+
+export default function Root({ children }: PropsWithChildren) {
+  return (
+    <html lang="en" style={{ height: "100%" }}>
+      <head>
+        <meta charSet="utf-8" />
+        <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, shrink-to-fit=no, viewport-fit=cover"
+        />
+        
+        {/* Preload Ionicons font for web */}
+        <link
+          rel="preload"
+          href="https://cdn.jsdelivr.net/npm/@expo/vector-icons@14.0.0/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf"
+          as="font"
+          type="font/ttf"
+          crossOrigin="anonymous"
+        />
+        
+        <ScrollViewStyleReset />
+        
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
+              /* Load Ionicons font */
+              @font-face {
+                font-family: 'Ionicons';
+                src: url('https://cdn.jsdelivr.net/npm/@expo/vector-icons@14.0.0/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf') format('truetype');
+                font-weight: normal;
+                font-style: normal;
+                font-display: swap;
+              }
+              
+              /* Load Material Icons */
+              @font-face {
+                font-family: 'MaterialIcons';
+                src: url('https://cdn.jsdelivr.net/npm/@expo/vector-icons@14.0.0/build/vendor/react-native-vector-icons/Fonts/MaterialIcons.ttf') format('truetype');
+                font-weight: normal;
+                font-style: normal;
+                font-display: swap;
+              }
+              
+              /* Load FontAwesome */
+              @font-face {
+                font-family: 'FontAwesome';
+                src: url('https://cdn.jsdelivr.net/npm/@expo/vector-icons@14.0.0/build/vendor/react-native-vector-icons/Fonts/FontAwesome.ttf') format('truetype');
+                font-weight: normal;
+                font-style: normal;
+                font-display: swap;
+              }
+              
+              /* Global mobile fixes */
+              * {
+                -webkit-tap-highlight-color: transparent;
+                -webkit-touch-callout: none;
+              }
+              
+              /* Fix body container */
+              body > div:first-child { 
+                position: fixed !important; 
+                top: 0; 
+                left: 0; 
+                right: 0; 
+                bottom: 0; 
+              }
+              
+              /* Fix overflow for tabs and headings */
+              [role="tablist"] [role="tab"] * { overflow: visible !important; }
+              [role="heading"], [role="heading"] * { overflow: visible !important; }
+              
+              /* Ensure border-radius works on all mobile browsers */
+              * {
+                -webkit-border-radius: inherit;
+              }
+              
+              /* Fix input sizing on iOS */
+              input, textarea {
+                -webkit-appearance: none;
+                -moz-appearance: none;
+                appearance: none;
+                font-size: 16px !important; /* Prevent iOS zoom on focus */
+              }
+              
+              /* Fix keyboard-related viewport issues on mobile */
+              html, body {
+                overscroll-behavior: none;
+                -webkit-overflow-scrolling: touch;
+              }
+              
+              /* Prevent zoom on double-tap */
+              html {
+                touch-action: manipulation;
+              }
+              
+              /* Ensure cards have proper border-radius */
+              [style*="borderRadius"] {
+                overflow: hidden;
+              }
+            `,
+          }}
+        />
+      </head>
+      <body
+        style={{
+          margin: 0,
+          height: "100%",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        }}
+      >
+        {children}
+      </body>
+    </html>
+  );
+}

@@ -1,0 +1,62 @@
+# Backend ignores (Python/Flask/Firebase)
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pys
+*.pdb
+.Python
+env/
+venv/
+.venv/
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env.bak/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# IDE/editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Firebase and service account keys
+firebase.json
+.firebaserc
+serviceAccountKey.json
+**/serviceAccountKey.json
+*.pem
+
+# Node (if some scripts exist)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Env secrets
+.env
+.env.*
+
+# Temporary
+tmp/
+*.swp
+*~
+

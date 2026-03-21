@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+python-socketio
+pydantic
+python-dotenv
+firebase-admin
+PyJWT
+passlib
+Pillow
+google-cloud-firestore
+
+twilio

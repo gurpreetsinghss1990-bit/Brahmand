@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="theme-color" content="#FF6B35" />
+  <title>Sanatan Lok</title>
+  <style>
+    /* iOS Safari viewport fix */
+    html, body, #root {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+    }
+    
+    /* Use dvh (dynamic viewport height) for iOS Safari */
+    @supports (height: 100dvh) {
+      html, body, #root {
+        height: 100dvh;
+        max-height: 100dvh;
+      }
+    }
+    
+    /* Fallback for browsers without dvh support */
+    @supports not (height: 100dvh) {
+      html, body, #root {
+        height: 100vh;
+        height: -webkit-fill-available;
+      }
+    }
+    
+    /* Prevent iOS Safari bounce/rubber-banding */
+    body {
+      overscroll-behavior: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Prevent zoom on input focus (iOS Safari) */
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>
