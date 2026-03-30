@@ -22,6 +22,10 @@ const adminApi = axios.create({
   },
 });
 
+const RETRYABLE_METHODS = new Set(['get', 'head', 'options']);
+const RETRYABLE_STATUS_CODES = new Set([502, 503]);
+const MAX_RETRY_ATTEMPTS = 1;
+
 // Add auth token to requests
 api.interceptors.request.use(async (config) => {
   const token = await AsyncStorage.getItem('auth_token');
@@ -36,18 +40,26 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const config = error.config;
-    // Retry up to 3 times on 503 or Network Error
-    if (config && (!config._retryCount || config._retryCount < 3)) {
-      if (error.response?.status === 503 || error.response?.status === 502 || error.code === 'ERR_NETWORK') {
-        config._retryCount = (config._retryCount || 0) + 1;
-        console.warn(`[API] Retrying request... Attempt ${config._retryCount}`);
-        const delay = config._retryCount * 2000; // 2s, 4s, 6s
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return api(config);
-      }
+    const method = (config?.method || 'get').toLowerCase();
+    const status = error.response?.status;
+    const shouldRetry =
+      config &&
+      RETRYABLE_METHODS.has(method) &&
+      (RETRYABLE_STATUS_CODES.has(status) || error.code === 'ERR_NETWORK') &&
+      (config._retryCount || 0) < MAX_RETRY_ATTEMPTS;
+
+    if (shouldRetry) {
+      config._retryCount = (config._retryCount || 0) + 1;
+      console.warn(
+        `[API] Retrying ${method.toUpperCase()} ${config.url}... Attempt ${config._retryCount}`
+      );
+      const delay = 1000 * config._retryCount;
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return api(config);
     }
+
     // If backend is temporarily unavailable, return a graceful fallback object.
-    if (error.response?.status === 503 || error.response?.status === 502) {
+    if (RETRYABLE_STATUS_CODES.has(status)) {
       console.warn('[API] Backend unavailable, returning fallback payload for 503/502');
       return Promise.resolve({
         data: null,
@@ -315,6 +327,8 @@ export const updateExtendedProfile = (data: {
   date_of_birth?: string;
   place_of_birth?: string;
   time_of_birth?: string;
+  place_of_birth_latitude?: number;
+  place_of_birth_longitude?: number;
 }) => 
   api.put('/user/profile/extended', data);
 

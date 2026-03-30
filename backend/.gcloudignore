@@ -1,0 +1,28 @@
+# Files ignored by gcloud when uploading source for Cloud Run builds.
+
+# Python cache and local envs
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Local/editor/system
+.DS_Store
+.vscode/
+.idea/
+
+# Local secrets and generated env files (runtime envs are passed via --env-vars-file)
+.env
+.env.*
+.gcloud.env.yaml
+
+# Build/test artifacts
+dist/
+build/
+logs/
+*.log
+
+# Keep firebase.json in deploy context (required by backend at runtime)
+!.gcloudignore

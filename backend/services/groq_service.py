@@ -10,36 +10,98 @@ def _panchang_payload_to_prompt(payload: dict) -> str:
         return "No Panchang data available."
 
     sources = payload.get('sources', {}) or {}
+    summary = payload.get('summary', {}) or {}
+    detail_sections = payload.get('detail_sections', []) or []
     panchang_data = sources.get('panchang_advanced', {})
+    auspicious_period = sources.get('auspicious_period', {})
+    inauspicious_period = sources.get('inauspicious_period', {})
     if isinstance(panchang_data, dict) and 'data' in panchang_data:
         panchang_data = panchang_data['data']
+    if isinstance(auspicious_period, dict) and 'data' in auspicious_period:
+        auspicious_period = auspicious_period['data']
+    if isinstance(inauspicious_period, dict) and 'data' in inauspicious_period:
+        inauspicious_period = inauspicious_period['data']
 
     lines = []
     lines.append(f"Date: {payload.get('date', '-')}")
     lines.append(f"Timezone: {payload.get('timezone', '-')}")
+    if payload.get('coordinates'):
+        lines.append(f"Coordinates: {payload.get('coordinates')}")
+
+    headline = summary.get('headline')
+    if headline:
+        lines.append(f"Headline: {headline}")
+
+    for section_name in ('overview', 'timings', 'insights'):
+        section_rows = summary.get(section_name)
+        if isinstance(section_rows, list) and section_rows:
+            lines.append(section_name.upper())
+            lines.extend(_rows_to_lines(section_rows))
 
     if not panchang_data:
         lines.append('No panchang_advanced section available.')
-        return '\n'.join(lines)
+    else:
+        def choose_first(field):
+            val = panchang_data.get(field)
+            if isinstance(val, list) and val:
+                return val[0]
+            return val
 
-    def choose_first(field):
-        val = panchang_data.get(field)
-        if isinstance(val, list) and val:
-            return val[0]
-        return val
-
-    for key in ['tithi', 'nakshatra', 'yoga', 'karana', 'paksha', 'vaara', 'sunrise', 'sunset', 'moonrise', 'moonset']:
-        v = choose_first(key)
-        if isinstance(v, dict):
-            name = v.get('name')
-            start = v.get('start')
-            end = v.get('end')
-            if name:
-                lines.append(f"{key.title()}: {name} ({start or '-'} - {end or '-'})")
+        for key in ['tithi', 'nakshatra', 'yoga', 'karana', 'paksha', 'vaara', 'sunrise', 'sunset', 'moonrise', 'moonset']:
+            v = choose_first(key)
+            if isinstance(v, dict):
+                name = v.get('name')
+                start = v.get('start')
+                end = v.get('end')
+                if name:
+                    lines.append(f"{key.title()}: {name} ({start or '-'} - {end or '-'})")
+                else:
+                    lines.append(f"{key.title()}: {v}")
             else:
                 lines.append(f"{key.title()}: {v}")
-        else:
-            lines.append(f"{key.title()}: {v}")
+
+    if isinstance(detail_sections, list):
+        for section in detail_sections[:8]:
+            title = section.get('title') or section.get('key') or 'Section'
+            rows = section.get('rows') or []
+            if rows:
+                lines.append(f"{title.upper()}")
+                lines.extend(_rows_to_lines(rows))
+
+    def _append_raw_period_section(title: str, source: Any):
+        if not source:
+            return
+
+        def visit(node: Any, prefix: str = ""):
+            if node in (None, "", [], {}):
+                return
+            if isinstance(node, list):
+                for item in node[:8]:
+                    visit(item, prefix)
+                return
+            if not isinstance(node, dict):
+                if prefix:
+                    lines.append(f"{prefix}: {node}")
+                return
+
+            name = node.get("name") or node.get("title") or node.get("label")
+            start = node.get("start") or node.get("start_time") or node.get("from")
+            end = node.get("end") or node.get("end_time") or node.get("to")
+            if name and (start or end):
+                lines.append(f"{name}: {start or '-'} - {end or '-'}")
+
+            for key, value in list(node.items())[:16]:
+                next_prefix = str(name or prefix or key).replace("_", " ").title()
+                if isinstance(value, (dict, list)):
+                    visit(value, next_prefix)
+                elif value not in (None, "", [], {}):
+                    lines.append(f"{next_prefix} {str(key).replace('_', ' ').title()}: {value}")
+
+        lines.append(title)
+        visit(source)
+
+    _append_raw_period_section("AUSPICIOUS PERIOD RAW", auspicious_period)
+    _append_raw_period_section("INAUSPICIOUS PERIOD RAW", inauspicious_period)
 
     return '\n'.join(lines)
 
@@ -176,6 +238,25 @@ class GroqService:
             max_completion_tokens=420,
         )
         return text or 'Unable to parse Groq astrology answer response.'
+
+    def answer_panchang_question(self, payload: dict, question: str) -> str:
+        prompt_text = _panchang_payload_to_prompt(payload)
+        text = self._create_chat_completion(
+            system_content=(
+                'You are a grounded Panchang assistant. '
+                'Answer only from the supplied Panchang data. If the data is missing, say so plainly. '
+                'Read the auspicious_period and inauspicious_period sections carefully when answering about good or avoid times. '
+                'Keep answers practical, calm, and easy to understand.'
+            ),
+            user_content=(
+                f'Panchang page data:\n{prompt_text}\n\n'
+                f'User question: {question}\n\n'
+                'Answer in simple Hindi/English. Reference only what is supported by the Panchang data on this page. '
+                'When possible, mention the exact period name and exact time window.'
+            ),
+            max_completion_tokens=420,
+        )
+        return text or 'Unable to parse Groq Panchang answer response.'
 
 
 

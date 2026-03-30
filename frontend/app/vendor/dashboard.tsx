@@ -18,11 +18,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 import { useVendorStore, DEFAULT_CATEGORIES } from '../../src/store/vendorStore';
+import { useAuthStore } from '../../src/store/authStore';
 import { VendorKYCModal } from '../../src/components/VendorKYCModal';
 
 export default function VendorDashboardScreen() {
   const router = useRouter();
-  const { myVendor, fetchMyVendor, updateVendor } = useVendorStore();
+  const { myVendor, fetchMyVendor, updateVendor, updateBusinessProfile } = useVendorStore();
+  const { logout } = useAuthStore();
   const [loading, setLoading] = useState(false);
   const [kycVisible, setKycVisible] = useState(false);
   
@@ -49,6 +51,25 @@ export default function VendorDashboardScreen() {
       subscription.remove();
     };
   }, [router]);
+
+  const performLogout = async () => {
+    await logout();
+    router.replace('/');
+  };
+
+  const handleLogout = () => {
+    if (Platform.OS === 'web') {
+      performLogout();
+      return;
+    }
+
+    Alert.alert('Logout', 'Are you sure you want to logout?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Logout', style: 'destructive', onPress: () => {
+        performLogout();
+      } },
+    ]);
+  };
 
   if (!myVendor) {
     return (
@@ -192,6 +213,7 @@ export default function VendorDashboardScreen() {
   const isVerified = myVendor?.kyc_status === 'verified';
   const isManualReview = myVendor?.kyc_status === 'manual_review';
   const isReviewOrVerified = isManualReview || isVerified;
+  const isVendorApproved = isVerified;
 
   const handleTellBusiness = () => {
     router.push('/vendor/business-details');
@@ -205,10 +227,17 @@ export default function VendorDashboardScreen() {
     setKycVisible(true);
   };
 
-  const menuItems = isReviewOrVerified
+  type MenuItem = {
+    icon: string;
+    label: string;
+    action: () => void | Promise<void>;
+    emphasis?: boolean;
+  };
+
+  const menuItems: MenuItem[] = isReviewOrVerified
     ? [
         ...(isVerified
-          ? [{ icon: '', label: 'Tell about your business', action: handleTellBusiness, emphasis: true }]
+          ? [{ icon: 'create', label: 'Tell about your business', action: handleTellBusiness }]
           : []),
         { icon: '', label: 'KYC & Verification', action: handleOpenKyc, emphasis: true }
       ]
@@ -229,7 +258,9 @@ export default function VendorDashboardScreen() {
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Vendor Dashboard</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity onPress={handleLogout} style={styles.logoutButtonHeader}>
+          <Ionicons name="log-out" size={22} color={COLORS.error} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
@@ -574,6 +605,12 @@ const styles = StyleSheet.create({
     marginTop: SPACING.lg,
     marginBottom: SPACING.sm,
   },
+  section: {
+    backgroundColor: COLORS.surface,
+    marginHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
+  },
   menuContainer: {
     backgroundColor: COLORS.surface,
     marginHorizontal: SPACING.md,
@@ -616,6 +653,72 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     paddingVertical: 8,
     paddingHorizontal: 6,
+  },
+  menuHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  menuIconButton: {
+    padding: SPACING.xs,
+  },
+  menuBox: {
+    backgroundColor: COLORS.surface,
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+  },
+  menuBoxText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.sm,
+  },
+  menuUploadButton: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    alignItems: 'center',
+  },
+  menuUploadButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  detectedItemsContainer: {
+    marginTop: SPACING.sm,
+  },
+  detectedItemsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: SPACING.xs,
+  },
+  detectedItemText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.xs,
+  },
+  saveButton: {
+    backgroundColor: COLORS.success,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    alignItems: 'center',
+    marginTop: SPACING.sm,
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  disabledButton: {
+    opacity: 0.6,
+  },
+  logoutButtonHeader: {
+    width: 24,
+    alignItems: 'flex-end',
   },
   reviewNotice: {
     marginHorizontal: SPACING.md,

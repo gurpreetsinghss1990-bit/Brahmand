@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  BackHandler,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,6 +23,20 @@ interface PrivacySettings {
 
 export default function PrivacySettingsScreen() {
   const router = useRouter();
+  const handleBack = useCallback(() => {
+    router.replace('/profile');
+  }, [router]);
+
+  useEffect(() => {
+    const backAction = () => {
+      handleBack();
+      return true;
+    };
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => subscription.remove();
+  }, [handleBack]);
+
   const [settings, setSettings] = useState<PrivacySettings>({
     read_receipts: true,
     online_status: true,
@@ -53,6 +68,7 @@ export default function PrivacySettingsScreen() {
     try {
       await api.put('/user/privacy-settings', newSettings);
     } catch (error) {
+      console.error('Error updating privacy settings:', error);
       // Revert on error
       setSettings(settings);
       Alert.alert('Error', 'Failed to update settings');
@@ -73,7 +89,7 @@ export default function PrivacySettingsScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Privacy Settings</Text>
@@ -94,7 +110,7 @@ export default function PrivacySettingsScreen() {
               <View style={styles.settingText}>
                 <Text style={styles.settingLabel}>Read Receipts</Text>
                 <Text style={styles.settingDescription}>
-                  When enabled, senders will see double ticks when you've read their messages
+                  When enabled, senders will see double ticks when you have read their messages
                 </Text>
               </View>
             </View>
@@ -109,7 +125,7 @@ export default function PrivacySettingsScreen() {
           <View style={styles.infoBox}>
             <Ionicons name="information-circle" size={16} color={COLORS.textSecondary} />
             <Text style={styles.infoText}>
-              If you turn off read receipts, you won't be able to see read receipts from others.
+              If you turn off read receipts, you will not be able to see read receipts from others.
             </Text>
           </View>
         </View>
@@ -126,7 +142,7 @@ export default function PrivacySettingsScreen() {
               <View style={styles.settingText}>
                 <Text style={styles.settingLabel}>Online Status</Text>
                 <Text style={styles.settingDescription}>
-                  Show when you're active on Sanatan Lok
+                  Show when you are active on Sanatan Lok
                 </Text>
               </View>
             </View>

@@ -11,7 +11,8 @@ import {
   Modal,
   TextInput,
   FlatList,
-  ActivityIndicator
+  ActivityIndicator,
+  Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,10 +23,8 @@ import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 
 const MENU_ITEMS = [
   { id: 'edit', icon: 'person-circle', label: 'Edit Profile', route: '/profile/edit' },
-  { id: 'horoscope', icon: 'star', label: 'Horoscope & Kundli', route: '/astrology' },
   { id: 'cultural', icon: 'people', label: 'Cultural Community', action: 'cultural' },
   { id: 'location', icon: 'location', label: 'Change Location', route: '/settings/location' },
-  { id: 'settings', icon: 'settings', label: 'Settings', route: '/settings' },
   { id: 'privacy', icon: 'shield-checkmark', label: 'Privacy', route: '/settings/privacy' },
   { id: 'notifications', icon: 'notifications', label: 'Notifications', route: '/settings/notifications' },
   { id: 'kyc', icon: 'document-text', label: 'KYC Verification', route: '/kyc' },
@@ -34,7 +33,8 @@ const MENU_ITEMS = [
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, logout } = useAuthStore();
+  const { user, logout, updateUser } = useAuthStore();
+  const userId = user?.id;
   const [refreshing, setRefreshing] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   
@@ -49,6 +49,7 @@ export default function ProfileScreen() {
     try {
       const res = await getUserProfile();
       setProfile(res.data);
+      updateUser(res.data || {});
       
       // Fetch cultural community info
       const cgRes = await getUserCulturalCommunity();
@@ -57,21 +58,21 @@ export default function ProfileScreen() {
       console.error('Error fetching profile:', error);
       if (error?.response?.status === 401 || error?.response?.status === 502) {
         // token may be invalid/expired, force logout and go to login
-        logout();
+        await logout();
         router.replace('/auth/phone');
       }
     } finally {
       setRefreshing(false);
     }
-  }, [logout, router]);
+  }, [logout, router, updateUser]);
 
   useEffect(() => {
-    if (!user) {
+    if (!userId) {
       router.replace('/auth/phone');
       return;
     }
     fetchProfile();
-  }, [fetchProfile, router, user]);
+  }, [fetchProfile, router, userId]);
 
   const loadCulturalCommunities = async (search?: string) => {
     setCGLoading(true);
@@ -126,26 +127,30 @@ export default function ProfileScreen() {
     }
   };
 
+  const performLogout = async () => {
+    await logout();
+    router.replace('/');
+  };
+
   const handleLogout = () => {
+    if (Platform.OS === 'web') {
+      performLogout();
+      return;
+    }
+
     Alert.alert(
       'Logout',
       'Are you sure you want to logout?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Logout', style: 'destructive', onPress: () => {
-          logout();
-          router.replace('/auth/phone');
-        }},
+      { text: 'Logout', style: 'destructive', onPress: () => {
+          performLogout();
+        } },
       ]
     );
   };
 
   const displayUser = profile || user;
-  const astrologyReady = Boolean(
-    displayUser?.date_of_birth &&
-    displayUser?.time_of_birth &&
-    displayUser?.place_of_birth
-  );
 
   return (
     <ScrollView 
@@ -200,34 +205,7 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      <TouchableOpacity
-        style={styles.astrologyCard}
-        onPress={() => router.push(astrologyReady ? '/astrology' : '/profile/edit')}
-      >
-        <View style={styles.astrologyCardTop}>
-          <View style={styles.astrologyIconWrap}>
-            <Ionicons name="star" size={22} color={COLORS.info} />
-          </View>
-          <View style={styles.astrologyCardContent}>
-            <Text style={styles.astrologyTitle}>Horoscope Profile</Text>
-            <Text style={styles.astrologySubtitle}>
-              {astrologyReady
-                ? 'Birth details saved. Astrology can use them across the app.'
-                : 'Add birth date, time, and place once for horoscope and astrology.'}
-            </Text>
-          </View>
-          <Ionicons
-            name={astrologyReady ? 'checkmark-circle' : 'chevron-forward'}
-            size={20}
-            color={astrologyReady ? COLORS.success : COLORS.textLight}
-          />
-        </View>
-        <View style={[styles.astrologyBadge, astrologyReady ? styles.astrologyBadgeReady : styles.astrologyBadgePending]}>
-          <Text style={[styles.astrologyBadgeText, astrologyReady ? styles.astrologyBadgeTextReady : styles.astrologyBadgeTextPending]}>
-            {astrologyReady ? 'Ready everywhere' : 'Setup needed'}
-          </Text>
-        </View>
-      </TouchableOpacity>
+      {/* Horoscope Profile removed per request */}
 
       {/* Menu Items */}
       <View style={styles.menuSection}>
@@ -245,9 +223,7 @@ export default function ProfileScreen() {
               {item.id === 'cultural' && userCG?.cultural_community && (
                 <Text style={styles.menuSubLabel}>{userCG.cultural_community}</Text>
               )}
-              {item.id === 'horoscope' && astrologyReady && (
-                <Text style={styles.menuSubLabel}>Birth details saved</Text>
-              )}
+              {/* Horoscope menu item removed */}
             </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
           </TouchableOpacity>

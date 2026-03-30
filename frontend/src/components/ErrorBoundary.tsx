@@ -25,10 +25,6 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
-    // Prevent stale navigation state errors from crashing the app permanently
-    if ((error as any)?.message?.includes('stale')) {
-      this.setState({ hasError: false, error: null });
-    }
   }
 
   handleRetry = () => {

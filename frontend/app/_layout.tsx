@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Slot, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
@@ -63,14 +63,20 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <StatusBar style="dark" />
-      <SafeSlot />
-      {/* Global Floating Button - only show when logged in */}
-      {token && !pathname.startsWith('/admin') && <FloatingUtilityButton />}
+      <View style={styles.root}>
+        <SafeSlot />
+        {/* Global Floating Button - only show when logged in */}
+        {token && !pathname.startsWith('/admin') && <FloatingUtilityButton />}
+      </View>
     </ErrorBoundary>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',

@@ -4,7 +4,16 @@ export interface User {
   name: string;
   photo?: string;
   language: string;
+  date_of_birth?: string;
+  time_of_birth?: string;
+  place_of_birth?: string;
+  place_of_birth_latitude?: number;
+  place_of_birth_longitude?: number;
   location?: Location;
+  home_location?: {
+    latitude: number;
+    longitude: number;
+  };
   badges: string[];
   reputation: number;
   communities: string[];

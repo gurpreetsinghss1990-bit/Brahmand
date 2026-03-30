@@ -24,6 +24,7 @@ import {
   getActiveSOSAlerts
 } from '../services/api';
 import * as Location from 'expo-location';
+import LocationService from '../services/location';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -81,6 +82,7 @@ const getHelpColor = (type: string): string => {
 export const FloatingUtilityButton = () => {
   const router = useRouter();
   const [modalVisible, setModalVisible] = useState(false);
+  const [hasLoadedData, setHasLoadedData] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sosLoading, setSOSLoading] = useState(false);
   const { activeRequest, fetchActiveRequest, resolveRequest, hasActiveRequest } = useHelpRequestStore();
@@ -96,12 +98,6 @@ export const FloatingUtilityButton = () => {
   
   // Pulse animation for nearby SOS
   const pulseAnim = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    fetchActiveRequest();
-    loadUtilityData();
-    checkSOSStatus();
-  }, []);
 
   useEffect(() => {
     if (nearbySOSCount > 0) {
@@ -149,9 +145,9 @@ export const FloatingUtilityButton = () => {
       setActiveSOS(mySOSRes.data);
 
       // Check for nearby SOS alerts
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const location = await Location.getCurrentPositionAsync({});
+      const ok = await LocationService.ensureForegroundPermission();
+      if (ok) {
+        const location = await LocationService.getCurrentPosition({});
         const nearbyRes = await getActiveSOSAlerts({
           lat: location.coords.latitude,
           lng: location.coords.longitude,
@@ -166,6 +162,17 @@ export const FloatingUtilityButton = () => {
     }
   };
 
+  const loadInitialUtilityData = async () => {
+    if (hasLoadedData) return;
+
+    await Promise.allSettled([
+      fetchActiveRequest(),
+      loadUtilityData(),
+      checkSOSStatus(),
+    ]);
+    setHasLoadedData(true);
+  };
+
   const handleCreateSOS = async () => {
     Alert.alert(
       'Emergency SOS',
@@ -178,13 +185,13 @@ export const FloatingUtilityButton = () => {
           onPress: async () => {
             setSOSLoading(true);
             try {
-              const { status } = await Location.requestForegroundPermissionsAsync();
-              if (status !== 'granted') {
+              const ok = await LocationService.ensureForegroundPermission();
+              if (!ok) {
                 Alert.alert('Location Required', 'Please enable location to send SOS alert');
                 return;
               }
-              
-              const location = await Location.getCurrentPositionAsync({});
+
+              const location = await LocationService.getCurrentPosition({});
               
               const response = await createSOSAlert({
                 latitude: location.coords.latitude,
@@ -285,7 +292,10 @@ export const FloatingUtilityButton = () => {
             hasNearbyEmergency && styles.floatingButtonEmergency,
             activeSOS && styles.floatingButtonActiveSOS
           ]}
-          onPress={() => setModalVisible(true)}
+          onPress={() => {
+            setModalVisible(true);
+            loadInitialUtilityData();
+          }}
           activeOpacity={0.9}
         >
           <View style={[
@@ -422,55 +432,65 @@ export const FloatingUtilityButton = () => {
                 </Text>
               </View>
 
-              {/* Panchang and Festival Row */}
-              <View style={styles.twoCardRow}>
+              {/* Utility Shortcuts */}
+              <View style={styles.utilityGrid}>
                 <TouchableOpacity 
-                  style={styles.mediumCard}
+                  style={styles.utilityCard}
                   onPress={() => {
                     setModalVisible(false);
                     router.push('/panchang');
                   }}
                 >
-                  <View style={[styles.mediumIconBg, { backgroundColor: '#FFE5CC' }]}>
+                  <View style={[styles.utilityIconBg, { backgroundColor: '#FFE5CC' }]}>
                     <Ionicons name="calendar" size={20} color={COLORS.primary} />
                   </View>
-                  <Text style={styles.mediumTitle}>Todays Panchang</Text>
-                  <Text style={styles.mediumSubtext}>{panchang?.tithi || 'Loading...'}</Text>
-                  <Text style={styles.mediumDetail}>{panchang?.nakshatra || ''}</Text>
+                  <Text style={styles.utilityTitle}>Panchang</Text>
+                  <Text style={styles.utilitySubtitle}>{panchang?.tithi || 'Loading...'}</Text>
                 </TouchableOpacity>
 
-                <View style={styles.mediumCard}>
-                  <View style={[styles.mediumIconBg, { backgroundColor: '#E8F5E9' }]}>
-                    <Ionicons name="sparkles" size={20} color={COLORS.success} />
+                <TouchableOpacity
+                  style={styles.utilityCard}
+                  onPress={() => {
+                    setModalVisible(false);
+                    router.push('/astrology?mode=horoscope');
+                  }}
+                >
+                  <View style={[styles.utilityIconBg, { backgroundColor: '#E3F2FD' }]}>
+                    <Ionicons name="star" size={20} color={COLORS.info} />
                   </View>
-                  <Text style={styles.mediumTitle}>Next Festival</Text>
-                  <Text style={styles.mediumSubtext}>{nextFestival?.name || 'Loading...'}</Text>
-                  <Text style={styles.mediumDetail}>
-                    {nextFestival?.days_until !== undefined 
-                      ? `in ${nextFestival.days_until} days` 
-                      : ''
-                    }
-                  </Text>
-                </View>
+                  <Text style={styles.utilityTitle}>Horoscope</Text>
+                  <Text style={styles.utilitySubtitle}>Birth profile</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.utilityCard}
+                  onPress={() => {
+                    setModalVisible(false);
+                    router.push('/astrology?mode=kundli');
+                  }}
+                >
+                  <View style={[styles.utilityIconBg, { backgroundColor: '#F3E8FF' }]}>
+                    <Ionicons name="planet" size={20} color="#7C3AED" />
+                  </View>
+                  <Text style={styles.utilityTitle}>Kundli</Text>
+                  <Text style={styles.utilitySubtitle}>Planet view</Text>
+                </TouchableOpacity>
               </View>
 
-              {/* Horoscope Card */}
-              <TouchableOpacity 
-                style={styles.horoscopeCard}
-                onPress={() => {
-                  setModalVisible(false);
-                  router.push('/astrology');
-                }}
-              >
-                <View style={[styles.mediumIconBg, { backgroundColor: '#E3F2FD' }]}>
-                  <Ionicons name="star" size={20} color={COLORS.info} />
+              <View style={styles.festivalCard}>
+                <View style={styles.festivalHeader}>
+                  <View style={[styles.utilityIconBg, { backgroundColor: '#E8F5E9' }]}>
+                    <Ionicons name="sparkles" size={20} color={COLORS.success} />
+                  </View>
+                  <View style={styles.festivalContent}>
+                    <Text style={styles.utilityTitle}>Next Festival</Text>
+                    <Text style={styles.utilitySubtitle}>{nextFestival?.name || 'Loading...'}</Text>
+                  </View>
                 </View>
-                <View style={styles.horoscopeContent}>
-                  <Text style={styles.mediumTitle}>Horoscope & Kundli</Text>
-                  <Text style={styles.mediumSubtext}>Birth details first, advanced tools on demand</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.textLight} />
-              </TouchableOpacity>
+                <Text style={styles.mediumDetail}>
+                  {nextFestival?.days_until !== undefined ? `Starts in ${nextFestival.days_until} days` : ''}
+                </Text>
+              </View>
 
               {/* SOS Card */}
               {!activeSOS && (
@@ -741,33 +761,34 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     lineHeight: 18,
   },
-  // Two Card Row
-  twoCardRow: {
+  utilityGrid: {
     flexDirection: 'row',
     gap: SPACING.sm,
     marginBottom: SPACING.md,
   },
-  mediumCard: {
+  utilityCard: {
     flex: 1,
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
+    minHeight: 124,
+    justifyContent: 'space-between',
   },
-  mediumIconBg: {
+  utilityIconBg: {
     width: 36,
     height: 36,
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: SPACING.xs,
+    marginBottom: SPACING.sm,
   },
-  mediumTitle: {
+  utilityTitle: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.text,
     marginBottom: 2,
   },
-  mediumSubtext: {
+  utilitySubtitle: {
     fontSize: 12,
     color: COLORS.primary,
     fontWeight: '500',
@@ -777,16 +798,17 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
     marginTop: 2,
   },
-  // Horoscope Card
-  horoscopeCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  festivalCard: {
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
     marginBottom: SPACING.md,
   },
-  horoscopeContent: {
+  festivalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  festivalContent: {
     flex: 1,
     marginLeft: SPACING.sm,
   },

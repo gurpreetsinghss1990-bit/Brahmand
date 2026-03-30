@@ -83,3 +83,5 @@ brahmand.zip
 # Environment files
 *.env
 *.env.*
+frontend/GoogleService-Info.plist
+frontend/google-services.json

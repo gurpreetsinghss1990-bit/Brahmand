@@ -73,6 +73,22 @@ async def verify_token(
     return payload
 
 
+async def optional_verify_token(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> Optional[Dict[str, Any]]:
+    """Optional token verification for public routes"""
+    if not credentials:
+        return None
+    try:
+        payload = decode_jwt_token(credentials.credentials)
+        user_id = payload.get("user_id")
+        if not user_id:
+            return None
+        return payload
+    except HTTPException:
+        return None
+
+
 async def get_current_user(
     token_data: Dict[str, Any] = Depends(verify_token)
 ) -> Dict[str, Any]:

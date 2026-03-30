@@ -2,6 +2,7 @@ import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../../src/constants/theme';
 
 const TabIcon = ({ name, color, focused }: { name: any; color: string; focused: boolean }) => (
@@ -11,6 +12,9 @@ const TabIcon = ({ name, color, focused }: { name: any; color: string; focused: 
 );
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+  const bottomInset = insets.bottom; // use real inset so tab sits flush with system nav
+
   return (
     <Tabs
       screenOptions={{
@@ -19,8 +23,8 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: COLORS.surface,
           borderTopColor: COLORS.border,
-          height: 70,
-          paddingBottom: 12,
+          height: 58 + insets.bottom,
+          paddingBottom: bottomInset,
           paddingTop: 8,
         },
         tabBarLabelStyle: {

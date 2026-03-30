@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, BackHandler } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -51,11 +51,24 @@ const GUIDELINES = [
 export default function GuidelinesScreen() {
   const router = useRouter();
 
+  const handleBack = useCallback(() => {
+    router.replace('/profile');
+  }, [router]);
+
+  useEffect(() => {
+    const backAction = () => {
+      handleBack();
+      return true;
+    };
+    const subscription = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => subscription.remove();
+  }, [handleBack]);
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Community Guidelines</Text>

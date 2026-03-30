@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import * as Location from 'expo-location';
 import {
   ActivityIndicator,
   Alert,
@@ -92,6 +93,33 @@ export default function EditProfileScreen() {
     setSaving(true);
     setError('');
     try {
+      // Attempt to geocode the entered place to coordinates so astrology can use exact birth location
+      let lat: number | undefined;
+      let lng: number | undefined;
+      const placeText = placeOfBirth.trim();
+      if (placeText) {
+        try {
+          const results = await Location.geocodeAsync(placeText);
+          if (Array.isArray(results) && results.length > 0) {
+            lat = results[0].latitude;
+            lng = results[0].longitude;
+          }
+        } catch {
+          // geocodeAsync may not be available on all platforms; fallback to Nominatim lookup
+          try {
+            const q = encodeURIComponent(placeText);
+            const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${q}`);
+            const data = await resp.json();
+            if (Array.isArray(data) && data.length > 0) {
+              lat = parseFloat(data[0].lat);
+              lng = parseFloat(data[0].lon);
+            }
+          } catch {
+            // ignore geocoding failure — we'll still save the textual place
+          }
+        }
+      }
+
       const response = await updateExtendedProfile({
         name: name.trim() || undefined,
         language: language.trim() || undefined,
@@ -100,7 +128,9 @@ export default function EditProfileScreen() {
         gotra: gotra.trim() || undefined,
         date_of_birth: dateOfBirth.trim() || undefined,
         time_of_birth: timeOfBirth.trim() || undefined,
-        place_of_birth: placeOfBirth.trim() || undefined,
+        place_of_birth: placeText || undefined,
+        place_of_birth_latitude: lat,
+        place_of_birth_longitude: lng,
       });
 
       updateUser(response.data || {});

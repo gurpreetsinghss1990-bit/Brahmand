@@ -1,10 +1,22 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, BackHandler } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+
+import { getProkeralaPanchang, askProkeralaAstrology } from '../src/services/api';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/constants/theme';
-import { getProkeralaPanchang, getProkeralaPanchangSummary } from '../src/services/api';
 import { useAuthStore } from '../src/store/authStore';
 
 type PanchangRow = {
@@ -12,101 +24,66 @@ type PanchangRow = {
   value: string;
 };
 
-type EndpointOption = {
-  key: string;
-  label: string;
-};
-
-type DetailSection = {
-  key: string;
-  title: string;
-  rows: PanchangRow[];
-};
-
-const DEFAULT_ENDPOINTS = 'panchang_advanced';
+const DEFAULT_ENDPOINTS = 'panchang_advanced,choghadiya,tara_bala,chandra_bala,auspicious_yoga,gowri_nalla_neram,auspicious_period,inauspicious_period';
 
 export default function PanchangScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const userLocation = (user as any)?.home_location;
+  const initialLocationLabel = [
+    (user as any)?.location?.area,
+    (user as any)?.location?.city,
+    (user as any)?.location?.state,
+  ].filter(Boolean).join(', ') || 'Current location unavailable';
+  const [customLocation, setCustomLocation] = useState('');
+  const [activeCoords, setActiveCoords] = useState<{ lat?: number; lng?: number }>({
+    lat: userLocation?.latitude,
+    lng: userLocation?.longitude,
+  });
+  const [activeLocationLabel, setActiveLocationLabel] = useState(initialLocationLabel);
+  const [locationLoading, setLocationLoading] = useState(false);
   const [payload, setPayload] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [extraLoadingKey, setExtraLoadingKey] = useState<string | null>(null);
+  const [question, setQuestion] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState('');
+  const [chatMessages, setChatMessages] = useState<{ question: string; answer: string }[]>([]);
   const isMountedRef = React.useRef(true);
-  const [aiSummary, setAiSummary] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState('');
-  const [sparkOn, setSparkOn] = useState(false);
+  const glowAnim = useRef(new Animated.Value(0.92)).current;
 
   const handleBack = useCallback(() => {
     router.replace('/(tabs)');
   }, [router]);
 
-  const mergePayloads = useCallback((currentPayload: any, incomingPayload: any) => {
-    if (!currentPayload) {
-      return incomingPayload;
-    }
-
-    const incomingSources = incomingPayload?.sources || {};
-    const mergedSources = {
-      ...(currentPayload?.sources || {}),
-      ...incomingSources,
-    };
-    const mergedErrors = {
-      ...(currentPayload?.errors || {}),
-      ...(incomingPayload?.errors || {}),
-    };
-    const incomingSections = Array.isArray(incomingPayload?.detail_sections) ? incomingPayload.detail_sections : [];
-    const currentSections = Array.isArray(currentPayload?.detail_sections) ? currentPayload.detail_sections : [];
-    const sectionMap = new Map<string, DetailSection>();
-
-    currentSections.forEach((section: DetailSection) => sectionMap.set(section.key, section));
-    incomingSections.forEach((section: DetailSection) => sectionMap.set(section.key, section));
-
-    const incomingSummary = incomingPayload?.summary;
-    const currentSummary = currentPayload?.summary;
-    const hasIncomingSummaryData = Boolean(
-      incomingSummary?.headline ||
-      (Array.isArray(incomingSummary?.overview) && incomingSummary.overview.length > 0) ||
-      (Array.isArray(incomingSummary?.timings) && incomingSummary.timings.length > 0) ||
-      (Array.isArray(incomingSummary?.insights) && incomingSummary.insights.length > 0)
-    );
-
-    return {
-      ...currentPayload,
-      ...incomingPayload,
-      sources: mergedSources,
-      errors: mergedErrors,
-      detail_sections: Array.from(sectionMap.values()),
-      available_endpoints: incomingPayload?.available_endpoints || currentPayload?.available_endpoints || [],
-      summary: hasIncomingSummaryData ? incomingSummary : currentSummary,
-    };
-  }, []);
-
-  const fetchBasePanchang = useCallback(async (forceRefresh = false) => {
+  const fetchBasePanchang = useCallback(async (forceRefresh = false, coords?: { lat?: number; lng?: number }) => {
     try {
       if (!isMountedRef.current) return;
       setError('');
-      const lat = userLocation?.latitude;
-      const lng = userLocation?.longitude;
+      const lat = coords?.lat ?? activeCoords.lat;
+      const lng = coords?.lng ?? activeCoords.lng;
       const response = await getProkeralaPanchang({
         lat: typeof lat === 'number' ? lat : undefined,
         lng: typeof lng === 'number' ? lng : undefined,
         endpoints: DEFAULT_ENDPOINTS,
         force_refresh: forceRefresh,
       });
-      if (isMountedRef.current) setPayload(response.data || null);
+      if (isMountedRef.current) {
+        setPayload(response.data || null);
+      }
     } catch (err: any) {
-      if (isMountedRef.current) setError(err?.response?.data?.detail || err?.message || 'Failed to load Panchang');
+      if (isMountedRef.current) {
+        setError(err?.response?.data?.detail || err?.message || 'Failed to load Panchang');
+      }
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
         setRefreshing(false);
       }
     }
-  }, [userLocation?.latitude, userLocation?.longitude]);
+  }, [activeCoords.lat, activeCoords.lng]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -116,136 +93,398 @@ export default function PanchangScreen() {
     };
   }, [fetchBasePanchang]);
 
-  // Handle Android hardware back button to avoid crashes and ensure safe navigation
   useEffect(() => {
-    const onBackPress = () => {
-      try {
-        router.back();
-        return true; // handled
-      } catch (e) {
-        return false; // allow default behavior
-      }
-    };
-
-    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
-    return () => {
-      subscription.remove();
-    };
-  }, [router]);
-
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      setSparkOn((prev) => !prev);
-    }, 550);
-    return () => clearInterval(intervalId);
-  }, []);
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, {
+          toValue: 1.08,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowAnim, {
+          toValue: 0.94,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [glowAnim]);
 
   const onRefresh = () => {
     setRefreshing(true);
     fetchBasePanchang(true);
   };
 
-  const fetchAIPanchangSummary = async () => {
-    if (aiLoading) return;
-    setAiLoading(true);
-    setAiError('');
-    setAiSummary(null);
-    try {
-      const lat = userLocation?.latitude;
-      const lng = userLocation?.longitude;
-      const response = await getProkeralaPanchangSummary({
-        lat: typeof lat === 'number' ? lat : undefined,
-        lng: typeof lng === 'number' ? lng : undefined,
-        force_refresh: false,
-      });
-      const summaryText = response.data?.summary;
-      if (isMountedRef.current) {
-        setAiSummary(summaryText || 'No summary was returned by AI.');
-      }
-    } catch (err: any) {
-      if (isMountedRef.current) {
-        setAiError(err?.response?.data?.detail || err?.message || 'Failed to fetch AI summary');
-      }
-    } finally {
-      if (isMountedRef.current) setAiLoading(false);
-    }
-  };
-
-  const fetchExtraEndpoint = useCallback(async (endpointKey: string) => {
-    try {
-      if (!isMountedRef.current) return;
-      setExtraLoadingKey(endpointKey);
-      setError('');
-      const lat = userLocation?.latitude;
-      const lng = userLocation?.longitude;
-      const response = await getProkeralaPanchang({
-        lat: typeof lat === 'number' ? lat : undefined,
-        lng: typeof lng === 'number' ? lng : undefined,
-        endpoints: endpointKey,
-      });
-      if (isMountedRef.current) setPayload((current: any) => mergePayloads(current, response.data || null));
-    } catch (err: any) {
-      if (isMountedRef.current) setError(err?.response?.data?.detail || err?.message || `Failed to load ${endpointKey}`);
-    } finally {
-      if (isMountedRef.current) setExtraLoadingKey(null);
-    }
-  }, [mergePayloads, userLocation?.latitude, userLocation?.longitude]);
-
   const summary = payload?.summary ?? {};
   const panchangSource = payload?.sources?.panchang_advanced?.data ?? payload?.sources?.panchang_advanced ?? {};
-
-  const formatIsoTime = (iso?: string) => {
-    if (!iso || typeof iso !== 'string') return '-';
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
-  };
-
-  const getFirst = (input: any) => {
-    if (Array.isArray(input) && input.length > 0) return input[0];
-    return input;
-  };
-
-  const panchangName = (value: any): string => {
-    if (!value) return '-';
-    const item = getFirst(value);
-    if (typeof item === 'string' || typeof item === 'number') return String(item);
-    if (typeof item === 'object') {
-      if (item.name) return `${item.name}${item.start && item.end ? ` (${formatIsoTime(item.start)} - ${formatIsoTime(item.end)})` : ''}`;
-      if (item.start && item.end) return `${formatIsoTime(item.start)} - ${formatIsoTime(item.end)}`;
-      return JSON.stringify(item);
-    }
-    return String(item);
-  };
-
-  const derivedOverview: PanchangRow[] = [
-    { label: 'Tithi', value: panchangName(panchangSource?.tithi) },
-    { label: 'Paksha', value: panchangName(panchangSource?.tithi ? getFirst(panchangSource?.tithi)?.paksha : panchangSource?.paksha) },
-    { label: 'Nakshatra', value: panchangName(panchangSource?.nakshatra) },
-    { label: 'Yoga', value: panchangName(panchangSource?.yoga) },
-    { label: 'Karana', value: panchangName(panchangSource?.karana) },
-  ];
-
-  const derivedTiming: PanchangRow[] = [
-    { label: 'Sunrise', value: formatIsoTime(panchangSource?.sunrise ?? panchangSource?.sunrise_time) },
-    { label: 'Sunset', value: formatIsoTime(panchangSource?.sunset ?? panchangSource?.sunset_time) },
-    { label: 'Moonrise', value: formatIsoTime(panchangSource?.moonrise) },
-    { label: 'Moonset', value: formatIsoTime(panchangSource?.moonset) },
-  ];
-
-  const overviewRows: PanchangRow[] = Array.isArray(summary.overview) && summary.overview.length > 0 ? summary.overview : derivedOverview;
-  const timingRows: PanchangRow[] = Array.isArray(summary.timings) && summary.timings.length > 0 ? summary.timings : derivedTiming;
-  const detailSections: DetailSection[] = Array.isArray(payload?.detail_sections) ? payload.detail_sections : [];
-  const extraSections = detailSections.filter((section) => section.key !== 'panchang_advanced');
-  const endpointOptions = useMemo(() => {
-    const availableEndpoints: EndpointOption[] = Array.isArray(payload?.available_endpoints) ? payload.available_endpoints : [];
-    const loadedEndpointKeys = new Set(extraSections.map((section) => section.key));
-    return availableEndpoints.filter((endpoint) => !loadedEndpointKeys.has(endpoint.key));
-  }, [extraSections, payload?.available_endpoints]);
+  const detailSections = Array.isArray(payload?.detail_sections) ? payload.detail_sections : [];
 
   const displayDate = payload?.date
-    ? new Date(payload.date).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-    : new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    ? new Date(payload.date).toLocaleDateString('en-IN', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      })
+    : new Date().toLocaleDateString('en-IN', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+
+  const formatClock = (value: any): string | null => {
+    if (!value) return null;
+    const raw = String(value);
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+    const match = raw.match(/^(\d{2}):(\d{2})(?::\d{2})?$/);
+    if (match) {
+      const [, hh, mm] = match;
+      const hour = Number(hh);
+      const suffix = hour >= 12 ? 'PM' : 'AM';
+      const normalized = hour % 12 || 12;
+      return `${normalized}:${mm} ${suffix}`;
+    }
+    return raw;
+  };
+
+  const extractNamedIntervalParts = (value: any): { name: string | null; start: string | null; end: string | null } => {
+    if (!value || typeof value !== 'object') {
+      return { name: null, start: null, end: null };
+    }
+
+    const name =
+      (typeof value?.name === 'string' && value.name.trim()) ||
+      (typeof value?.title === 'string' && value.title.trim()) ||
+      (typeof value?.result === 'string' && value.result.trim()) ||
+      (typeof value?.status === 'string' && value.status.trim()) ||
+      null;
+
+    const start =
+      formatClock(value?.start) ||
+      formatClock(value?.start_time) ||
+      formatClock(value?.from) ||
+      null;
+    const end =
+      formatClock(value?.end) ||
+      formatClock(value?.end_time) ||
+      formatClock(value?.to) ||
+      null;
+
+    if (name || start || end) {
+      return { name, start, end };
+    }
+
+    for (const nestedKey of ['current', 'details', 'value', 'data', 'item', 'active', 'present']) {
+      const nestedValue = value?.[nestedKey];
+      if (nestedValue && typeof nestedValue === 'object') {
+        const nestedParts = extractNamedIntervalParts(nestedValue);
+        if (nestedParts.name || nestedParts.start || nestedParts.end) {
+          return nestedParts;
+        }
+      }
+    }
+
+    for (const nestedValue of Object.values(value)) {
+      if (nestedValue && typeof nestedValue === 'object') {
+        const nestedParts = extractNamedIntervalParts(nestedValue);
+        if (nestedParts.name || nestedParts.start || nestedParts.end) {
+          return nestedParts;
+        }
+      }
+    }
+
+    return { name: null, start: null, end: null };
+  };
+
+  const getNamedPanchangValue = (field: string): string | null => {
+    const raw = panchangSource?.[field];
+    const item = Array.isArray(raw) ? raw[0] : raw;
+    if (!item) return null;
+    if (typeof item !== 'object') return String(item);
+    const { name, start, end } = extractNamedIntervalParts(item);
+    if (name && start && end) return `${name} (${start} - ${end})`;
+    if (name && end) return `${name} until ${end}`;
+    if (name) return String(name);
+    if (start && end) return `${start} - ${end}`;
+    return null;
+  };
+  const overviewRows: PanchangRow[] = (
+    Array.isArray(summary.overview) ? summary.overview : []
+  ).map((row: PanchangRow) => {
+    const label = row.label.toLowerCase();
+    if (label === 'tithi') {
+      return { ...row, value: getNamedPanchangValue('tithi') || row.value };
+    }
+    if (label === 'nakshatra') {
+      return { ...row, value: getNamedPanchangValue('nakshatra') || row.value };
+    }
+    if (label === 'yoga') {
+      return { ...row, value: getNamedPanchangValue('yoga') || row.value };
+    }
+    if (label === 'karana') {
+      return { ...row, value: getNamedPanchangValue('karana') || row.value };
+    }
+    return row;
+  });
+  const timingRows: PanchangRow[] = (
+    Array.isArray(summary.timings) ? summary.timings : []
+  ).filter((row: PanchangRow) =>
+    ['sunrise', 'sunset', 'moonrise', 'moonset'].includes(row.label.toLowerCase())
+  );
+
+  const toTitle = (value: string) =>
+    value
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+
+  const buildPeriodRows = (source: any, fallbackLabel: string): PanchangRow[] => {
+    const rows: PanchangRow[] = [];
+    const seen = new Set<string>();
+
+    const visit = (node: any, prefix?: string) => {
+      if (!node || rows.length >= 8) return;
+
+      if (Array.isArray(node)) {
+        node.forEach((item) => visit(item, prefix));
+        return;
+      }
+
+      if (typeof node !== 'object') return;
+
+      const explicitName =
+        (typeof node?.name === 'string' && node.name.trim()) ||
+        (typeof node?.title === 'string' && node.title.trim()) ||
+        (typeof node?.label === 'string' && node.label.trim()) ||
+        null;
+      const start =
+        formatClock(node?.start) ||
+        formatClock(node?.start_time) ||
+        formatClock(node?.from) ||
+        formatClock(node?.begin) ||
+        null;
+      const end =
+        formatClock(node?.end) ||
+        formatClock(node?.end_time) ||
+        formatClock(node?.to) ||
+        formatClock(node?.finish) ||
+        null;
+
+      const label = explicitName || prefix || fallbackLabel;
+      if (label && (start || end)) {
+        const value = start && end ? `${start} - ${end}` : start || end || '';
+        const key = `${label}:${value}`;
+        if (!seen.has(key) && value) {
+          seen.add(key);
+          rows.push({ label, value });
+        }
+      }
+
+      const preferredKeys = ['periods', 'items', 'data', 'details', 'current', 'active', 'present', 'value', 'list'];
+      preferredKeys.forEach((key) => {
+        const nestedValue = node?.[key];
+        if (nestedValue && typeof nestedValue === 'object') {
+          visit(nestedValue, explicitName || prefix);
+        }
+      });
+
+      Object.entries(node).forEach(([key, nestedValue]) => {
+        if (preferredKeys.includes(key) || !nestedValue || typeof nestedValue !== 'object') {
+          return;
+        }
+        visit(nestedValue, explicitName || prefix || toTitle(key));
+      });
+    };
+
+    visit(source);
+    return rows;
+  };
+
+  const flattenDisplayRows = (value: any, prefix = ''): PanchangRow[] => {
+    const rows: PanchangRow[] = [];
+
+    if (value === null || value === undefined || value === '' || rows.length >= 12) {
+      return rows;
+    }
+
+    if (Array.isArray(value)) {
+      value.slice(0, 8).forEach((item, index) => {
+        rows.push(...flattenDisplayRows(item, prefix || `${index + 1}`));
+      });
+      return rows.slice(0, 12);
+    }
+
+    if (typeof value !== 'object') {
+      if (prefix) {
+        rows.push({ label: prefix, value: String(value) });
+      }
+      return rows;
+    }
+
+    const start =
+      formatClock(value?.start) ||
+      formatClock(value?.start_time) ||
+      formatClock(value?.from) ||
+      null;
+    const end =
+      formatClock(value?.end) ||
+      formatClock(value?.end_time) ||
+      formatClock(value?.to) ||
+      null;
+
+    if (prefix && (start || end)) {
+      rows.push({ label: prefix, value: start && end ? `${start} - ${end}` : start || end || '' });
+      return rows;
+    }
+
+    Object.entries(value).forEach(([key, item]) => {
+      if (rows.length >= 12) return;
+      const nextLabel = prefix ? `${prefix} ${toTitle(key)}` : toTitle(key);
+      if (item && typeof item === 'object') {
+        rows.push(...flattenDisplayRows(item, nextLabel));
+      } else if (item !== null && item !== undefined && item !== '') {
+        rows.push({ label: nextLabel, value: String(item) });
+      }
+    });
+
+    return rows.slice(0, 12);
+  };
+
+  const dedupeRows = (rows: PanchangRow[]) => {
+    const seen = new Set<string>();
+    return rows.filter((row) => {
+      const normalizedLabel = row.label.trim();
+      const normalizedValue = row.value.trim();
+      if (!normalizedLabel || !normalizedValue) return false;
+      const key = `${normalizedLabel.toLowerCase()}::${normalizedValue.toLowerCase()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  const summaryAuspiciousRows: PanchangRow[] = (
+    Array.isArray(summary.insights) ? summary.insights : []
+  ).filter((row: PanchangRow) => row.label.toLowerCase().includes('auspicious'));
+  const detailAuspiciousRows: PanchangRow[] =
+    detailSections.find((section: any) => section?.key === 'auspicious_period')?.rows ?? [];
+
+  const rawAuspiciousRows = buildPeriodRows(
+    payload?.sources?.auspicious_period?.data ?? payload?.sources?.auspicious_period,
+    'Auspicious Period'
+  );
+  const fallbackAuspiciousRows = flattenDisplayRows(
+    payload?.sources?.auspicious_period?.data ?? payload?.sources?.auspicious_period,
+    'Auspicious'
+  );
+  const auspiciousPeriodRows = dedupeRows([
+    ...detailAuspiciousRows,
+    ...rawAuspiciousRows,
+    ...fallbackAuspiciousRows,
+    ...summaryAuspiciousRows,
+  ]).slice(0, 8);
+
+  const detailInauspiciousRows: PanchangRow[] =
+    detailSections.find((section: any) => section?.key === 'inauspicious_period')?.rows ?? [];
+  const rawInauspiciousRows = buildPeriodRows(
+    payload?.sources?.inauspicious_period?.data ?? payload?.sources?.inauspicious_period,
+    'Inauspicious Period'
+  );
+  const fallbackInauspiciousRows = flattenDisplayRows(
+    payload?.sources?.inauspicious_period?.data ?? payload?.sources?.inauspicious_period,
+    'Inauspicious'
+  );
+  const summaryInauspiciousRows: PanchangRow[] = (
+    Array.isArray(summary.timings) ? summary.timings : []
+  ).filter((row: PanchangRow) => {
+    const label = row.label.toLowerCase();
+    return label.includes('rahu') || label.includes('gulika') || label.includes('yamaganda');
+  });
+  const inauspiciousPeriodRows = dedupeRows([
+    ...detailInauspiciousRows,
+    ...rawInauspiciousRows,
+    ...fallbackInauspiciousRows,
+    ...summaryInauspiciousRows,
+  ]).slice(0, 8);
+
+  const handleCustomLocationSubmit = async () => {
+    const placeText = customLocation.trim();
+    if (!placeText || locationLoading) return;
+
+    setLocationLoading(true);
+    setError('');
+    try {
+      let lat: number | undefined;
+      let lng: number | undefined;
+
+      try {
+        const results = await Location.geocodeAsync(placeText);
+        if (Array.isArray(results) && results.length > 0) {
+          lat = results[0].latitude;
+          lng = results[0].longitude;
+        }
+      } catch {
+        try {
+          const q = encodeURIComponent(placeText);
+          const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${q}`);
+          const data = await resp.json();
+          if (Array.isArray(data) && data.length > 0) {
+            lat = parseFloat(data[0].lat);
+            lng = parseFloat(data[0].lon);
+          }
+        } catch {
+          // ignore fallback errors
+        }
+      }
+
+      if (typeof lat !== 'number' || typeof lng !== 'number') {
+        setError('Could not find coordinates for that location.');
+        return;
+      }
+
+      const nextCoords = { lat, lng };
+      setActiveCoords(nextCoords);
+      setActiveLocationLabel(placeText);
+      await fetchBasePanchang(true, nextCoords);
+    } finally {
+      setLocationLoading(false);
+    }
+  };
+
+  const submitQuestion = async () => {
+    const trimmed = question.trim();
+    if (!trimmed || chatLoading) return;
+
+    setChatLoading(true);
+    setChatError('');
+    try {
+      const response = await askProkeralaAstrology({
+        question: trimmed,
+        astrology: {
+          kind: 'panchang',
+          payload,
+        },
+        la: 'en',
+      });
+      if (isMountedRef.current) {
+        setChatMessages((current) => [{ question: trimmed, answer: response.data?.answer || 'No answer returned.' }, ...current]);
+        setQuestion('');
+      }
+    } catch (err: any) {
+      if (isMountedRef.current) {
+        setChatError(err?.response?.data?.detail || err?.message || 'Failed to ask AI');
+      }
+    } finally {
+      if (isMountedRef.current) setChatLoading(false);
+    }
+  };
 
   const InfoRow = ({ label, value, icon }: { label: string; value: string; icon: keyof typeof Ionicons.glyphMap }) => (
     <View style={styles.infoRow}>
@@ -274,141 +513,149 @@ export default function PanchangScreen() {
         <TouchableOpacity onPress={handleBack}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Todays Panchang</Text>
-        <TouchableOpacity
-          style={[
-            styles.aiButton,
-            sparkOn ? styles.aiButtonSparkOn : null,
-          ]}
-          onPress={fetchAIPanchangSummary}
-          disabled={aiLoading}
-        >
-          {aiLoading ? (
-            <ActivityIndicator size="small" color={COLORS.surface} />
-          ) : (
-            <Ionicons name="flash" size={20} color={COLORS.surface} />
-          )}
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Today&apos;s Panchang</Text>
+        <View style={styles.headerSpacer} />
       </View>
 
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        contentContainerStyle={{ paddingBottom: 132 + insets.bottom }}
       >
-        <View style={styles.dateCard}>
-          <Ionicons name="calendar" size={24} color={COLORS.primary} />
-          <Text style={styles.dateText}>{displayDate}</Text>
-          {summary?.headline ? <Text style={styles.headlineText}>{summary.headline}</Text> : null}
+        <View style={styles.heroCard}>
+          <Text style={styles.heroEyebrow}>Today&apos;s Panchang:</Text>
+          <Text style={styles.heroTitleCompact}>{displayDate}</Text>
+          <Text style={styles.heroSubtext}>Location: {activeLocationLabel}</Text>
+          <View style={styles.customLocationRow}>
+            <TextInput
+              style={styles.customLocationInput}
+              placeholder="Enter custom location"
+              placeholderTextColor={COLORS.textLight}
+              value={customLocation}
+              onChangeText={setCustomLocation}
+            />
+            <TouchableOpacity
+              style={styles.customLocationButton}
+              onPress={handleCustomLocationSubmit}
+              disabled={locationLoading}
+            >
+              {locationLoading ? (
+                <ActivityIndicator size="small" color={COLORS.surface} />
+              ) : (
+                <Text style={styles.customLocationButtonText}>Submit</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
-
-        {aiError ? (
-          <View style={[styles.section, styles.errorCard]}>
-            <Text style={styles.errorText}>{aiError}</Text>
-          </View>
-        ) : null}
-
-        {aiSummary ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>AI Panchang Summary</Text>
-            <View style={styles.card}>
-              <Text style={styles.infoValue}>{aiSummary}</Text>
-            </View>
-          </View>
-        ) : null}
 
         {error ? (
           <View style={styles.section}>
             <View style={styles.errorCard}>
-              <Ionicons name="alert-circle" size={22} color={COLORS.primary} />
+              <Ionicons name="warning" size={20} color={COLORS.primary} />
               <Text style={styles.errorText}>{error}</Text>
             </View>
           </View>
         ) : null}
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Overview</Text>
-          <View style={styles.card}>
-            {overviewRows.length > 0 ? (
-              overviewRows.map((row) => (
-                <InfoRow key={row.label} label={row.label} value={row.value} icon="sparkles" />
-              ))
-            ) : (
-              <InfoRow label="Status" value="No Panchang overview available." icon="information-circle" />
-            )}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Timings</Text>
-          <View style={styles.card}>
-            {timingRows.length > 0 ? (
-              timingRows.map((row) => (
-                <InfoRow key={row.label} label={row.label} value={row.value} icon="time" />
-              ))
-            ) : (
-              <InfoRow label="Status" value="No timings available." icon="information-circle" />
-            )}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Load More Endpoints</Text>
-          <View style={styles.card}>
-            <Text style={styles.helperText}>Tap an endpoint name only when you need it. This saves Prokerala requests.</Text>
-            <View style={styles.endpointGrid}>
-              {endpointOptions.map((endpoint) => {
-                const isLoadingEndpoint = extraLoadingKey === endpoint.key;
-                return (
-                  <TouchableOpacity
-                    key={endpoint.key}
-                    style={styles.endpointChip}
-                    onPress={() => fetchExtraEndpoint(endpoint.key)}
-                    disabled={Boolean(extraLoadingKey)}
-                  >
-                    {isLoadingEndpoint ? (
-                      <ActivityIndicator size="small" color={COLORS.primary} />
-                    ) : (
-                      <Text style={styles.endpointChipText}>{endpoint.label}</Text>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            {!endpointOptions.length ? (
-              <Text style={styles.helperText}>All optional endpoints loaded for this session.</Text>
-            ) : null}
-          </View>
-        </View>
-
-        {extraSections.map((section) => (
-          <View key={section.key} style={styles.section}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            <View style={styles.card}>
-              {section.rows.length > 0 ? (
-                section.rows.map((row) => (
-                  <InfoRow key={`${section.key}-${row.label}`} label={row.label} value={row.value} icon="planet" />
-                ))
-              ) : (
-                <InfoRow label="Status" value="No clean rows available for this endpoint." icon="information-circle" />
-              )}
-            </View>
-          </View>
-        ))}
-
-        {payload?.errors && Object.keys(payload.errors).length > 0 ? (
+        {chatMessages.length || chatError ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Provider Errors</Text>
             <View style={styles.card}>
-              {Object.entries(payload.errors).map(([key, value]) => (
-                <InfoRow key={key} label={key} value={String(value)} icon="warning" />
+              <Animated.View pointerEvents="none" style={[styles.chatAura, { transform: [{ scale: glowAnim }] }]} />
+              <View style={styles.chatOrbs}>
+                <Animated.View style={[styles.chatOrb, styles.chatOrbPrimary, { transform: [{ scale: glowAnim }] }]} />
+                <Animated.View style={[styles.chatOrb, styles.chatOrbSecondary, { transform: [{ scale: glowAnim }] }]} />
+                <Animated.View style={[styles.chatOrb, styles.chatOrbAccent, { transform: [{ scale: glowAnim }] }]} />
+              </View>
+              <View style={styles.chatFeed}>
+                {chatMessages.map((message, index) => (
+                  <View key={`${message.question}-${index}`} style={styles.chatBubbleWrap}>
+                    <View style={styles.userBubble}>
+                      <Text style={styles.userBubbleText}>{message.question}</Text>
+                    </View>
+                    <View style={styles.aiBubble}>
+                      <Text style={styles.chatAnswer}>{message.answer}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+              {chatError ? <Text style={styles.inlineErrorText}>{chatError}</Text> : null}
+            </View>
+          </View>
+        ) : null}
+
+        {timingRows.length ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Timings</Text>
+            <View style={styles.card}>
+              {timingRows.map((row) => (
+                <InfoRow key={`timing-${row.label}`} label={row.label} value={row.value} icon="time" />
               ))}
             </View>
           </View>
         ) : null}
 
-        <View style={styles.bottomPadding} />
+        {overviewRows.length || auspiciousPeriodRows.length || inauspiciousPeriodRows.length ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Detailed Panchang</Text>
+            <View style={styles.card}>
+              {overviewRows.length ? (
+                <>
+                  <Text style={styles.backgroundBlockTitle}>Core Details</Text>
+                  {overviewRows.map((row) => (
+                    <InfoRow key={`overview-${row.label}`} label={row.label} value={row.value} icon="sparkles" />
+                  ))}
+                </>
+              ) : null}
+              {auspiciousPeriodRows.length ? (
+                <>
+                  <Text style={[styles.backgroundBlockTitle, overviewRows.length ? styles.backgroundBlockTitleSpaced : null]}>
+                    Auspicious Time
+                  </Text>
+                  {auspiciousPeriodRows.map((row) => (
+                    <InfoRow key={`insight-${row.label}`} label={row.label} value={row.value} icon="star" />
+                  ))}
+                </>
+              ) : null}
+              {inauspiciousPeriodRows.length ? (
+                <>
+                  <Text
+                    style={[
+                      styles.backgroundBlockTitle,
+                      overviewRows.length || auspiciousPeriodRows.length ? styles.backgroundBlockTitleSpaced : null,
+                    ]}
+                  >
+                    Inauspicious Time
+                  </Text>
+                  {inauspiciousPeriodRows.map((row) => (
+                    <InfoRow key={`inauspicious-${row.label}`} label={row.label} value={row.value} icon="warning" />
+                  ))}
+                </>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
       </ScrollView>
+
+      <View style={[styles.stickyComposerWrap, { paddingBottom: Math.max(insets.bottom, SPACING.sm) }]}>
+        <View style={styles.askRow}>
+          <TextInput
+            style={styles.questionInput}
+            placeholder="Ask AI"
+            placeholderTextColor={COLORS.textLight}
+            value={question}
+            onChangeText={setQuestion}
+            multiline
+          />
+          <TouchableOpacity style={styles.askButton} onPress={submitQuestion} disabled={chatLoading}>
+            {chatLoading ? (
+              <ActivityIndicator size="small" color={COLORS.surface} />
+            ) : (
+              <Text style={styles.askButtonText}>Enter</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -428,30 +675,15 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.divider,
   },
   headerTitle: {
+    flex: 1,
+    textAlign: 'center',
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.text,
+    marginHorizontal: SPACING.sm,
   },
-  aiButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 18,
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.background,
-    shadowColor: COLORS.primary,
-    shadowOpacity: 0.7,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 3,
-  },
-  aiButtonSparkOn: {
-    borderColor: '#FFD700',
-    shadowColor: '#FFD700',
-    shadowOpacity: 1,
-    transform: [{ scale: 1.12 }],
+  headerSpacer: {
+    width: 24,
   },
   scrollView: {
     flex: 1,
@@ -467,58 +699,88 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 14,
   },
-  dateCard: {
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
+  heroCard: {
     margin: SPACING.md,
     padding: SPACING.lg,
-    borderRadius: BORDER_RADIUS.lg,
+    borderRadius: BORDER_RADIUS.xl,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: '#F6D4B8',
   },
-  dateText: {
+  heroEyebrow: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    color: COLORS.primary,
+  },
+  heroTitle: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.text,
-    marginTop: SPACING.sm,
+    marginTop: 6,
+    maxWidth: '88%',
   },
-  samvatText: {
+  heroTitleCompact: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginTop: 4,
+  },
+  heroSubtext: {
     fontSize: 13,
     color: COLORS.textSecondary,
-    marginTop: SPACING.xs,
-    textAlign: 'center',
+    marginTop: 4,
   },
-  headlineText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.primary,
-    marginTop: SPACING.xs,
-    textAlign: 'center',
+  customLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginTop: SPACING.md,
   },
-  noticeText: {
-    fontSize: 12,
-    color: COLORS.primary,
-    marginTop: SPACING.sm,
-    textAlign: 'center',
+  customLocationInput: {
+    flex: 1,
+    minHeight: 46,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.md,
+    color: COLORS.text,
+    backgroundColor: '#FFFDF9',
+  },
+  customLocationButton: {
+    minWidth: 88,
+    minHeight: 46,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+  },
+  customLocationButtonText: {
+    color: COLORS.surface,
+    fontWeight: '700',
   },
   section: {
-    padding: SPACING.md,
-    paddingTop: 0,
+    paddingHorizontal: SPACING.md,
+    paddingBottom: SPACING.md,
   },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.text,
     marginBottom: SPACING.sm,
   },
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.sm,
+    padding: SPACING.md,
+    overflow: 'hidden',
   },
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.sm,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.divider,
   },
@@ -526,64 +788,152 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: `${COLORS.primary}15`,
+    backgroundColor: `${COLORS.primary}14`,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: SPACING.md,
   },
   infoLabel: {
     flex: 1,
-    fontSize: 14,
     color: COLORS.textSecondary,
+    fontSize: 14,
   },
   infoValue: {
     flex: 1,
     textAlign: 'right',
+    color: COLORS.text,
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.text,
   },
   errorCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: `${COLORS.primary}15`,
+    padding: SPACING.md,
     borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.lg,
+    backgroundColor: `${COLORS.primary}14`,
   },
   errorText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.primary,
-    marginLeft: SPACING.md,
     flex: 1,
-  },
-  helperText: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.sm,
-  },
-  endpointGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  endpointChip: {
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: `${COLORS.primary}40`,
-    backgroundColor: `${COLORS.primary}10`,
-    marginRight: SPACING.sm,
-    marginBottom: SPACING.sm,
-    minHeight: 38,
-    justifyContent: 'center',
-  },
-  endpointChipText: {
+    marginLeft: SPACING.sm,
     color: COLORS.primary,
-    fontSize: 13,
     fontWeight: '600',
   },
-  bottomPadding: {
-    height: SPACING.xl,
+  chatAura: {
+    position: 'absolute',
+    top: -34,
+    right: -18,
+    width: 124,
+    height: 124,
+    borderRadius: 62,
+    backgroundColor: 'rgba(255, 153, 51, 0.12)',
+  },
+  chatOrbs: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: SPACING.sm,
+    zIndex: 1,
+  },
+  chatOrb: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  chatOrbPrimary: {
+    backgroundColor: COLORS.primary,
+  },
+  chatOrbSecondary: {
+    backgroundColor: '#F59E0B',
+  },
+  chatOrbAccent: {
+    backgroundColor: '#FB923C',
+  },
+  questionInput: {
+    flex: 1,
+    minHeight: 52,
+    maxHeight: 120,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm + 2,
+    color: COLORS.text,
+    textAlignVertical: 'center',
+    backgroundColor: '#FFFDF9',
+  },
+  askRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: SPACING.sm,
+  },
+  askButton: {
+    backgroundColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.md,
+    minWidth: 72,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+  },
+  askButtonText: {
+    color: COLORS.surface,
+    fontWeight: '700',
+  },
+  inlineErrorText: {
+    color: COLORS.error,
+    marginTop: SPACING.sm,
+    fontSize: 13,
+  },
+  chatFeed: {
+    marginTop: SPACING.sm,
+    gap: SPACING.sm,
+    zIndex: 1,
+  },
+  chatBubbleWrap: {
+    gap: SPACING.sm,
+  },
+  userBubble: {
+    alignSelf: 'flex-end',
+    maxWidth: '85%',
+    backgroundColor: `${COLORS.primary}15`,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+  },
+  userBubbleText: {
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  aiBubble: {
+    alignSelf: 'stretch',
+    backgroundColor: '#FFFDF9',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+  },
+  chatAnswer: {
+    color: COLORS.text,
+    lineHeight: 22,
+  },
+  backgroundBlockTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: SPACING.sm,
+  },
+  backgroundBlockTitleSpaced: {
+    marginTop: SPACING.md,
+  },
+  stickyComposerWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.sm,
+    backgroundColor: COLORS.background,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.divider,
   },
 });

@@ -13,9 +13,18 @@ import {
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { initializeFirebase, firebaseConfig } from '../../src/services/firebase/config';
 import { getAuth, PhoneAuthProvider, signInWithPhoneNumber, RecaptchaVerifier } from 'firebase/auth';
+
+// Debug: Log Firebase config on web
+if (typeof window !== 'undefined' && Platform.OS === 'web') {
+  console.log('[Phone Auth] Firebase Config:', {
+    apiKey: firebaseConfig.apiKey ? 'SET' : 'MISSING',
+    authDomain: firebaseConfig.authDomain,
+    projectId: firebaseConfig.projectId,
+    appId: firebaseConfig.appId ? 'SET' : 'MISSING',
+  });
+}
 import { COLORS, SPACING } from '../../src/constants/theme';
 
 const { width } = Dimensions.get('window');
@@ -34,8 +43,6 @@ export default function PhoneScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
-  const recaptchaRef = useRef<any>(null);
-
   // Ensure Firebase app is initialized before RecaptchaVerifier runs
   React.useEffect(() => {
     initializeFirebase();
@@ -62,11 +69,6 @@ export default function PhoneScreen() {
     try {
       const fullPhone = `+91${phone}`;
 
-      // Guard to ensure ref is attached after mount
-      if (!recaptchaRef.current && Platform.OS !== 'web') {
-        setError('reCAPTCHA not ready. Please wait and try again.');
-        return;
-      }
 
       try {
         const app = initializeFirebase();
@@ -75,45 +77,52 @@ export default function PhoneScreen() {
         let verificationId = '';
         
         if (Platform.OS === 'web') {
-           try {
-              // FOR WEB: Fully destroy the old RecaptchaVerifier and create a new one every time
-              if ((window as any).recaptchaVerifier) {
-                  try { (window as any).recaptchaVerifier.clear(); } catch(e){}
-                  (window as any).recaptchaVerifier = null;
-                  const container = document.getElementById('recaptcha-container');
-                  if (container) container.innerHTML = ''; // clear DOM
-              }
+          try {
+            // Clear any existing verifier
+            if ((window as any).recaptchaVerifier) {
+              try { (window as any).recaptchaVerifier.clear(); } catch (e) {}
+              (window as any).recaptchaVerifier = null;
+              const container = document.getElementById('recaptcha-container');
+              if (container) container.innerHTML = '';
+            }
 
-              (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-                  size: 'invisible'
-              });
-
-              // Also render explicitly
-              await (window as any).recaptchaVerifier.render();
-
-              const confirmationResult = await signInWithPhoneNumber(auth, fullPhone, (window as any).recaptchaVerifier);
-              verificationId = confirmationResult.verificationId;
-              router.push({ pathname: '/auth/otp', params: { phone: fullPhone, verificationId } });
-           } catch (err: any) {
-              console.log('Firebase web auth error:', err);
-              setError(err?.message || 'Failed to send OTP.');
-              if ((window as any).recaptchaVerifier) {
-                  try { (window as any).recaptchaVerifier.clear(); } catch(e){}
-                  (window as any).recaptchaVerifier = null;
-              }
-           }
-           return;
-        } else {
-            // For iOS and Android with expo-firebase-recaptcha
-            // NOTE: Do not forcefully unmount or clear `recaptchaRef.current` blindly 
-            // because `PhoneAuthProvider` expects a stable application verifier reference
+            console.log('[Phone Auth] Creating RecaptchaVerifier with auth:', auth?.app?.name);
             
-            const phoneProvider = new PhoneAuthProvider(auth);
-            verificationId = await phoneProvider.verifyPhoneNumber(
-              fullPhone,
-              recaptchaRef.current
-            );
+            // Create new verifier - use explicit siteKey from Firebase config if available
+            const verifierOptions = {
+              size: 'invisible' as const,
+            };
+
+            (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', verifierOptions);
+            
+            console.log('[Phone Auth] Rendering recaptcha...');
+            await (window as any).recaptchaVerifier.render();
+            console.log('[Phone Auth] Sending OTP to:', fullPhone);
+            
+            const confirmationResult = await signInWithPhoneNumber(auth, fullPhone, (window as any).recaptchaVerifier);
+            console.log('[Phone Auth] OTP sent successfully');
+            verificationId = confirmationResult.verificationId;
             router.push({ pathname: '/auth/otp', params: { phone: fullPhone, verificationId } });
+          } catch (err: any) {
+            console.log('Firebase web auth error:', err);
+            setError(err?.message || 'Failed to send OTP.');
+            if ((window as any).recaptchaVerifier) {
+              try { (window as any).recaptchaVerifier.clear(); } catch (e) {}
+              (window as any).recaptchaVerifier = null;
+            }
+          }
+          return;
+        }
+
+        // Native simplified path for react-native-firebase
+        try {
+          const nativeAuth = require('@react-native-firebase/auth').default;
+          const confirmation = await nativeAuth().signInWithPhoneNumber(fullPhone);
+          verificationId = confirmation.verificationId;
+          router.push({ pathname: '/auth/otp', params: { phone: fullPhone, verificationId, provider: 'native' } });
+        } catch (nativeErr: any) {
+          console.log('[PhoneScreen] Native phone auth error:', nativeErr);
+          throw nativeErr;
         }
       } catch (err: any) {
         console.log('Firebase verifyPhoneNumber error object:', err);
@@ -152,12 +161,6 @@ export default function PhoneScreen() {
         style={styles.keyboardView}
       >
         {Platform.OS === 'web' ? <div id="recaptcha-container"></div> : null}
-        
-        <FirebaseRecaptchaVerifierModal
-          ref={recaptchaRef}
-          firebaseConfig={firebaseConfig}
-          attemptInvisibleVerification={true}
-        />
 
         {/* Back Button */}
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>

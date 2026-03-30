@@ -11,14 +11,17 @@ import {
   Linking,
   Alert,
   ActivityIndicator,
-  Image
+  Image,
+  Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
+import formatDistance from '../../src/utils/formatDistance';
 import { VendorRegistrationModal } from '../../src/components/VendorRegistrationModal';
 import { useAuthStore } from '../../src/store/authStore';
 import { useVendorStore, Vendor, DEFAULT_CATEGORIES } from '../../src/store/vendorStore';
+import { ensureForegroundPermission, getCurrentPosition } from '../../src/services/location';
 import * as Location from 'expo-location';
 
 const TABS = ['Nearby', 'Pooja', 'Grocery', 'Restaurant', 'Festival'];
@@ -26,6 +29,7 @@ const TABS = ['Nearby', 'Pooja', 'Grocery', 'Restaurant', 'Festival'];
 export default function VendorScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
+  const userId = user?.id;
   const { 
     vendors, 
     myVendor, 
@@ -45,34 +49,79 @@ export default function VendorScreen() {
   const [filteredCategories, setFilteredCategories] = useState<string[]>([]);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
+  const homeLocation = (user as any)?.home_location;
+  const homeLatitude = homeLocation?.latitude;
+  const homeLongitude = homeLocation?.longitude;
+  const hasHomeCoordinates = typeof homeLatitude === 'number' && typeof homeLongitude === 'number';
+
   const loadData = useCallback(async () => {
     // Get user location
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const location = await Location.getCurrentPositionAsync({});
+      if (Platform.OS === 'web') {
+        const hasPermission = await ensureForegroundPermission();
+        if (hasPermission) {
+          const location = await getCurrentPosition();
+          setUserLocation({
+            lat: location.coords.latitude,
+            lng: location.coords.longitude
+          });
+          await fetchVendors({
+            lat: location.coords.latitude,
+            lng: location.coords.longitude
+          });
+        } else if (hasHomeCoordinates) {
+          setUserLocation({
+            lat: homeLatitude!,
+            lng: homeLongitude!,
+          });
+          await fetchVendors({
+            lat: homeLatitude!,
+            lng: homeLongitude!,
+          });
+        } else {
+          await fetchVendors();
+        }
+      } else {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const location = await Location.getCurrentPositionAsync({});
+          setUserLocation({
+            lat: location.coords.latitude,
+            lng: location.coords.longitude
+          });
+          await fetchVendors({
+            lat: location.coords.latitude,
+            lng: location.coords.longitude
+          });
+        } else {
+          await fetchVendors();
+        }
+      }
+    } catch (error) {
+      if (Platform.OS === 'web' && hasHomeCoordinates) {
         setUserLocation({
-          lat: location.coords.latitude,
-          lng: location.coords.longitude
+          lat: homeLatitude!,
+          lng: homeLongitude!,
         });
         await fetchVendors({
-          lat: location.coords.latitude,
-          lng: location.coords.longitude
+          lat: homeLatitude!,
+          lng: homeLongitude!,
         });
       } else {
         await fetchVendors();
       }
-    } catch (error) {
-      await fetchVendors();
     }
     
     await fetchMyVendor();
     await fetchCategories();
-  }, []);
+  }, [fetchVendors, fetchMyVendor, fetchCategories, hasHomeCoordinates, homeLatitude, homeLongitude]);
 
   useEffect(() => {
+    if (!userId) {
+      return;
+    }
     loadData();
-  }, []);
+  }, [loadData, userId]);
 
   useEffect(() => {
     if (searchTerm) {
@@ -193,17 +242,10 @@ export default function VendorScreen() {
           )}
           
           {/* Distance */}
-          {item.distance !== undefined && item.distance !== null && (
-            <View style={styles.distanceRow}>
-              <Ionicons name="location" size={12} color={COLORS.textLight} />
-              <Text style={styles.distanceText}>
-                {item.distance < 1 
-                  ? `${Math.round(item.distance * 1000)}m away`
-                  : `${item.distance.toFixed(1)} km away`
-                }
-              </Text>
-            </View>
-          )}
+          <View style={styles.distanceRow}>
+            <Ionicons name="location" size={12} color={COLORS.textLight} />
+            <Text style={styles.distanceText}>{formatDistance(item.distance)}</Text>
+          </View>
         </View>
 
         {/* Call Button */}

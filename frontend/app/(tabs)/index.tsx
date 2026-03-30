@@ -47,6 +47,7 @@ interface CommunityRequest {
 export default function CommunityScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
+  const userId = user?.id;
   const [activeTab, setActiveTab] = useState('Chat');
   const [communities, setCommunities] = useState<Community[]>([]);
   const [requests, setRequests] = useState<CommunityRequest[]>([]);
@@ -88,12 +89,12 @@ export default function CommunityScreen() {
   }, [activeTab]);
 
   useEffect(() => {
-    if (!user) {
+    if (!userId) {
       router.replace('/auth/phone');
       return;
     }
     fetchData();
-  }, [fetchData, router, user]);
+  }, [fetchData, router, userId]);
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);

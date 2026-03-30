@@ -16,6 +16,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { BORDER_RADIUS, COLORS, SPACING } from '../../src/constants/theme';
 import { useVendorStore } from '../../src/store/vendorStore';
+import { extractKycTextFromImage } from '../../src/services/api';
 
 const IMAGE_SLOTS = [0, 1, 2, 3, 4];
 
@@ -29,6 +30,8 @@ export default function VendorBusinessDetailsScreen() {
   const [menuItems, setMenuItems] = useState<string[]>([]);
   const [savingMenu, setSavingMenu] = useState(false);
   const [offersHomeDelivery, setOffersHomeDelivery] = useState(false);
+  const [visionLoading, setVisionLoading] = useState(false);
+  const [visionExtractedItems, setVisionExtractedItems] = useState<string[]>([]);
 
   useEffect(() => {
     fetchMyVendor().catch((error) => {
@@ -157,6 +160,59 @@ export default function VendorBusinessDetailsScreen() {
     }
   };
 
+  const handleOcrUpload = async () => {
+    if (!validateAccess() || !myVendor) {
+      return;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.status !== 'granted') {
+      Alert.alert('Permission Denied', 'Media library access is required to upload menu images.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.7,
+      allowsEditing: false,
+    });
+
+    if (result.canceled || !result.assets?.length) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    const fileName = (asset as any).fileName || `menu-${Date.now()}.jpg`;
+    const mimeType = asset.mimeType || 'image/jpeg';
+
+    try {
+      setVisionLoading(true);
+      const response = await extractKycTextFromImage(myVendor.id, {
+        uri: asset.uri,
+        name: fileName,
+        type: mimeType,
+      });
+      const extracted = response?.data?.raw_texts || [];
+      const fallbackText = response?.data?.text || response?.data?.full_text || '';
+      const source = extracted.length > 0 ? extracted.join('\n') : fallbackText;
+      const parsed: string[] = source
+        .split(/[\n;•●·,]/)
+        .map((t: string) => t.trim())
+        .filter((t: string): t is string => Boolean(t));
+      const uniqueParsed = Array.from(new Set(parsed));
+      setVisionExtractedItems(uniqueParsed);
+
+      if (!uniqueParsed.length) {
+        Alert.alert('No items found', 'Cloud Vision did not detect menu text. Please try another image.');
+      }
+    } catch (error: any) {
+      console.warn('Menu OCR failed', error);
+      Alert.alert('Upload failed', 'Could not process menu image.');
+    } finally {
+      setVisionLoading(false);
+    }
+  };
+
   if (!myVendor) {
     return (
       <SafeAreaView style={styles.container}>
@@ -196,6 +252,38 @@ export default function VendorBusinessDetailsScreen() {
             );
           })}
         </View>
+
+        <TouchableOpacity style={styles.ocrUploadButton} onPress={handleOcrUpload}>
+          {visionLoading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Ionicons name="cloud-upload" size={20} color="#fff" />
+              <Text style={styles.ocrUploadButtonText}>Upload Menu Image (OCR)</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        {visionExtractedItems.length > 0 && (
+          <View style={styles.detectedItemsCard}>
+            <Text style={styles.detectedItemsTitle}>Detected menu items from image:</Text>
+            {visionExtractedItems.map((item, idx) => (
+              <View key={`${item}-${idx}`} style={styles.detectedItemRow}>
+                <Text style={styles.detectedItemText}>• {item}</Text>
+                <TouchableOpacity onPress={() => {
+                  const newItems = [...menuItems, item];
+                  setMenuItems(newItems);
+                  setVisionExtractedItems(visionExtractedItems.filter((_, i) => i !== idx));
+                }}>
+                  <Ionicons name="add-circle" size={20} color={COLORS.primary} />
+                </TouchableOpacity>
+              </View>
+            ))}
+            <TouchableOpacity style={styles.clearOcrButton} onPress={() => setVisionExtractedItems([])}>
+              <Text style={styles.clearOcrButtonText}>Clear detected items</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <TouchableOpacity style={styles.menuToggleButton} onPress={() => setShowMenuEditor((prev) => !prev)}>
           <Text style={styles.menuToggleText}>{showMenuEditor ? 'Hide menu list' : 'Add menu items you offer'}</Text>
@@ -403,6 +491,58 @@ const styles = StyleSheet.create({
   },
   toggleTextActive: {
     color: COLORS.primary,
+  },
+  ocrUploadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+    backgroundColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.md,
+    paddingVertical: SPACING.sm + 2,
+    marginTop: SPACING.sm,
+  },
+  ocrUploadButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  detectedItemsCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: SPACING.md,
+    marginTop: SPACING.sm,
+    gap: SPACING.xs,
+  },
+  detectedItemsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: SPACING.xs,
+  },
+  detectedItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: SPACING.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  detectedItemText: {
+    color: COLORS.text,
+    flex: 1,
+    fontSize: 13,
+  },
+  clearOcrButton: {
+    marginTop: SPACING.sm,
+    alignItems: 'center',
+  },
+  clearOcrButtonText: {
+    color: COLORS.error,
+    fontSize: 13,
+    fontWeight: '600',
   },
   saveButton: {
     marginTop: SPACING.md,

@@ -12,6 +12,5 @@ google-cloud-firestore
 google-cloud-vision
 
 twilio
-face_recognition
 requests
 groq

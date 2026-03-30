@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useCallback, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, BackHandler } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -31,10 +31,23 @@ export default function KYCStatusScreen() {
     return 'KYC is pending. Please complete verification from Manage Business.';
   };
 
+  const handleBack = useCallback(() => {
+    router.replace('/profile');
+  }, [router]);
+
+  useEffect(() => {
+    const backAction = () => {
+      handleBack();
+      return true;
+    };
+    const subscription = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => subscription.remove();
+  }, [handleBack]);
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={handleBack}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
         <Text style={styles.title}>KYC Verification</Text>

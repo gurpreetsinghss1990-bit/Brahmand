@@ -1,20 +1,21 @@
 import React from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  ScrollView, 
-  TouchableOpacity, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
   Linking,
   Alert,
   Image,
-  BackHandler
+  BackHandler,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 import { useVendorStore } from '../../src/store/vendorStore';
+import { formatDistance } from '../../src/utils/formatDistance';
 
 const TRUST_LABELS = {
   trusted: { label: 'Trusted Vendor', color: COLORS.success, icon: 'shield-checkmark' },
@@ -25,6 +26,9 @@ const TRUST_LABELS = {
 export default function VendorProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const actionBarBottomInset = Math.max(insets.bottom, SPACING.sm);
+  const actionBarHeight = 64 + actionBarBottomInset;
   const { vendors, fetchMyVendor } = useVendorStore();
   
   const vendor = vendors.find(v => v.id === id);
@@ -72,6 +76,8 @@ export default function VendorProfileScreen() {
     ? { label: 'Approved Vendor', color: COLORS.success, icon: 'shield-checkmark' }
     : TRUST_LABELS.frequent;
   const galleryImages = (vendor.business_gallery_images || vendor.photos || []).filter((photo) => !!photo);
+  const vendorCategories = Array.isArray(vendor.categories) ? vendor.categories : [];
+  const menuItems = Array.isArray(vendor.menu_items) ? vendor.menu_items : [];
 
   const handleCall = () => {
     Linking.openURL(`tel:${vendor.phone_number}`);
@@ -132,7 +138,7 @@ export default function VendorProfileScreen() {
           {/* Distance */}
           <View style={styles.metaRow}>
             <Ionicons name="location" size={16} color={COLORS.textSecondary} />
-            <Text style={styles.metaText}>{vendor.distance ? `${vendor.distance.toFixed(1)} km away` : 'Distance unknown'}</Text>
+            <Text style={styles.metaText}>{formatDistance(vendor.distance)}</Text>
           </View>
         </View>
 
@@ -140,22 +146,12 @@ export default function VendorProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Business Categories</Text>
           <View style={styles.categoriesContainer}>
-            {vendor.categories.map((cat, index) => (
+            {vendorCategories.map((cat, index) => (
               <View key={index} style={styles.categoryChip}>
                 <Text style={styles.categoryText}>{cat}</Text>
               </View>
             ))}
           </View>
-        </View>
-
-        {/* Address */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Address</Text>
-          <Text style={styles.addressText}>{vendor.full_address}</Text>
-          <TouchableOpacity style={styles.directionsButton} onPress={handleDirections}>
-            <Ionicons name="navigate" size={18} color="#FFFFFF" />
-            <Text style={styles.directionsText}>Get Directions</Text>
-          </TouchableOpacity>
         </View>
 
         {/* Gallery Photos */}
@@ -170,11 +166,17 @@ export default function VendorProfileScreen() {
           </View>
         )}
 
+        {/* Address */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Address</Text>
+          <Text style={styles.addressText}>{vendor.full_address}</Text>
+        </View>
+
         {/* Menu */}
-        {vendor.menu_items && vendor.menu_items.length > 0 && (
+        {menuItems.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>What they offer</Text>
-            {vendor.menu_items.map((item, index) => (
+            {menuItems.map((item, index) => (
               <Text key={`${item}-${index}`} style={styles.hoursText}>• {item}</Text>
             ))}
           </View>
@@ -187,14 +189,18 @@ export default function VendorProfileScreen() {
           </Text>
         </View>
 
-        <View style={{ height: 100 }} />
+        <View style={{ height: actionBarHeight + SPACING.lg }} />
       </ScrollView>
 
-      {/* Fixed Call Button */}
-      <View style={styles.callButtonContainer}>
-        <TouchableOpacity style={styles.callButton} onPress={handleCall}>
-          <Ionicons name="call" size={22} color="#FFFFFF" />
-          <Text style={styles.callButtonText}>Call Now</Text>
+      {/* Fixed Action Row */}
+      <View style={[styles.callButtonContainer, { paddingBottom: actionBarBottomInset }]}>
+        <TouchableOpacity style={styles.callActionButton} onPress={handleCall}>
+          <Ionicons name="call" size={20} color="#FFFFFF" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.directionsActionButton, styles.flexAction]} onPress={handleDirections}>
+          <Ionicons name="navigate" size={20} color="#FFFFFF" />
+          <Text style={styles.actionButtonText}>Get Directions</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -316,21 +322,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     lineHeight: 22,
-    marginBottom: SPACING.md,
-  },
-  directionsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.info,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    gap: 6,
-  },
-  directionsText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
   },
   galleryPhoto: {
     width: 100,
@@ -352,6 +343,68 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.md,
     gap: SPACING.sm,
   },
+  menuHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  menuIconButton: {
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: `${COLORS.primary}20`,
+    padding: 8,
+  },
+  menuBox: {
+    backgroundColor: `${COLORS.secondary}10`,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+    marginTop: SPACING.sm,
+  },
+  menuBoxText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+  },
+  menuUploadButton: {
+    marginTop: SPACING.sm,
+    backgroundColor: COLORS.primary,
+    alignSelf: 'stretch',
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuUploadButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  detectedItemsContainer: {
+    marginTop: SPACING.sm,
+  },
+  detectedItemsTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: SPACING.xs,
+  },
+  detectedItemText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+  saveButton: {
+    marginTop: SPACING.sm,
+    backgroundColor: COLORS.success,
+    alignSelf: 'stretch',
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  disabledButton: {
+    opacity: 0.6,
+  },
   offerText: {
     flex: 1,
     fontSize: 14,
@@ -360,13 +413,45 @@ const styles = StyleSheet.create({
   },
   callButtonContainer: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
-    padding: SPACING.md,
+    bottom: 0,
+    minHeight: 64,
+    paddingHorizontal: SPACING.md,
     backgroundColor: COLORS.surface,
     borderTopWidth: 1,
-    borderTopColor: COLORS.divider,
+    borderColor: COLORS.divider,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  flexAction: {
+    flex: 1,
+  },
+  callActionButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.success,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  directionsActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.info,
+    minHeight: 48,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+    gap: SPACING.sm,
   },
   callButton: {
     flexDirection: 'row',
@@ -378,6 +463,11 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   callButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  actionButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',

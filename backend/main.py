@@ -55,7 +55,7 @@ from models.schemas import (
     VendorCreate, VendorUpdate, CulturalCommunityUpdate,
     SOSCreate, AstrologyProfile, CommunityRequestCreate, RequestType, RequestUrgency, VisibilityLevel
 )
-from middleware.security import verify_token, create_jwt_token
+from middleware.security import verify_token, optional_verify_token, create_jwt_token
 from middleware.rate_limiter import auth_rate_limit, messaging_rate_limit
 from utils.helpers import (
     WISDOM_QUOTES, TITHIS, generate_sl_id, generate_circle_code,
@@ -886,14 +886,27 @@ async def get_profile_completion(token_data: dict = Depends(verify_token)):
     db = await get_db()
     user = await db.get_document('users', token_data["user_id"])
     
-    fields = ["name", "photo", "language", "location", "kuldevi", "kuldevi_temple_area", "gotra", "date_of_birth", "place_of_birth", "time_of_birth"]
+    fields = [
+        "name", "photo", "language", "location", "kuldevi", "kuldevi_temple_area",
+        "gotra", "date_of_birth", "place_of_birth", "time_of_birth",
+        "place_of_birth_latitude", "place_of_birth_longitude"
+    ]
     completed = sum(1 for f in fields if user.get(f))
     
     return {
         "completion_percentage": int((completed / len(fields)) * 100),
         "completed_fields": completed,
         "total_fields": len(fields),
-        "horoscope_eligible": all(user.get(f) for f in ["date_of_birth", "place_of_birth", "time_of_birth"])
+        "horoscope_eligible": all(
+            user.get(f)
+            for f in [
+                "date_of_birth",
+                "place_of_birth",
+                "time_of_birth",
+                "place_of_birth_latitude",
+                "place_of_birth_longitude",
+            ]
+        )
     }
 
 
@@ -902,7 +915,16 @@ async def get_horoscope(token_data: dict = Depends(verify_token)):
     db = await get_db()
     user = await db.get_document('users', token_data["user_id"])
     
-    if not all(user.get(f) for f in ["date_of_birth", "place_of_birth", "time_of_birth"]):
+    if not all(
+        user.get(f)
+        for f in [
+            "date_of_birth",
+            "place_of_birth",
+            "time_of_birth",
+            "place_of_birth_latitude",
+            "place_of_birth_longitude",
+        ]
+    ):
         raise HTTPException(status_code=400, detail="Complete birth details to view horoscope")
     
     dob = user.get("date_of_birth", "2000-01-01")
@@ -2696,23 +2718,49 @@ async def ask_prokerala_astrology_question(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    astrology_payload = body.get("astrology")
-    if not isinstance(astrology_payload, dict) or not astrology_payload:
+    request_payload = body.get("astrology")
+    payload_kind = None
+    grounded_payload = request_payload
+
+    if isinstance(request_payload, dict) and request_payload.get("kind") == "panchang":
+        payload_kind = "panchang"
+        grounded_payload = request_payload.get("payload")
+
+    if not isinstance(grounded_payload, dict) or not grounded_payload:
         resolved_lat, resolved_lng = _resolve_user_coordinates(user, None, None)
-        resolved_datetime = _normalize_birth_datetime(user, None)
-        astrology_payload = await prokerala_astrology_service.get_aggregated_astrology(
-            lat=resolved_lat,
-            lng=resolved_lng,
-            datetime_str=resolved_datetime,
-            ayanamsa=int(body.get("ayanamsa") or 1),
-            la=body.get("la"),
-        )
+        if payload_kind == "panchang":
+            grounded_payload = await prokerala_panchang_service.get_aggregated_panchang(
+                lat=resolved_lat,
+                lng=resolved_lng,
+                date_str=body.get("date_str"),
+                force_refresh=bool(body.get("force_refresh") or False),
+                endpoint_keys=[
+                    "panchang_advanced",
+                    "choghadiya",
+                    "tara_bala",
+                    "chandra_bala",
+                    "auspicious_yoga",
+                    "gowri_nalla_neram",
+                ],
+            )
+        else:
+            resolved_datetime = _normalize_birth_datetime(user, None)
+            grounded_payload = await prokerala_astrology_service.get_aggregated_astrology(
+                lat=resolved_lat,
+                lng=resolved_lng,
+                datetime_str=resolved_datetime,
+                ayanamsa=int(body.get("ayanamsa") or 1),
+                la=body.get("la"),
+            )
 
     try:
         from services.groq_service import get_groq_service
 
         groq_client = get_groq_service()
-        answer = groq_client.answer_astrology_question(astrology_payload, question)
+        if payload_kind == "panchang":
+            answer = groq_client.answer_panchang_question(grounded_payload, question)
+        else:
+            answer = groq_client.answer_astrology_question(grounded_payload, question)
         return {
             "question": question,
             "answer": answer,
@@ -2956,7 +3004,7 @@ async def get_vendors(
     lat: Optional[float] = None,
     lng: Optional[float] = None,
     limit: int = 50,
-    token_data: dict = Depends(verify_token)
+    token_data: Optional[dict] = Depends(optional_verify_token)
 ):
     """Get vendors with optional filters"""
     db = await get_db()
@@ -4458,6 +4506,8 @@ async def get_astrology_profile(token_data: dict = Depends(verify_token)):
         "date_of_birth": user.get('date_of_birth'),
         "time_of_birth": user.get('time_of_birth'),
         "place_of_birth": user.get('place_of_birth'),
+        "place_of_birth_latitude": user.get('place_of_birth_latitude'),
+        "place_of_birth_longitude": user.get('place_of_birth_longitude'),
         "rashi": user.get('rashi'),
         "rashi_english": RASHIS.get(user.get('rashi'), {}).get("english") if user.get('rashi') else None
     }

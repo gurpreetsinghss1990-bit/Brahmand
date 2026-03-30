@@ -21,6 +21,8 @@ class ProkeralaPanchangService:
         "choghadiya": "/v2/astrology/choghadiya",
         "chandra_bala": "/v2/astrology/chandra-bala",
         "tara_bala": "/v2/astrology/tara-bala",
+        "auspicious_period": "/v2/astrology/auspicious-period",
+        "inauspicious_period": "/v2/astrology/inauspicious-period",
         "hora": "/v2/astrology/hora",
         "solstice": "/v2/astrology/solstice",
         "ritu": "/v2/astrology/ritu",
@@ -33,6 +35,8 @@ class ProkeralaPanchangService:
         "choghadiya": "Choghadiya",
         "chandra_bala": "Chandra Bala",
         "tara_bala": "Tara Bala",
+        "auspicious_period": "Auspicious Period",
+        "inauspicious_period": "Inauspicious Period",
         "hora": "Hora",
         "solstice": "Solstice",
         "ritu": "Ritu",
@@ -46,6 +50,8 @@ class ProkeralaPanchangService:
     ENDPOINT_PRIORITY = [
         "panchang_advanced",
         "choghadiya",
+        "auspicious_period",
+        "inauspicious_period",
         "auspicious_yoga",
         "disha_shool",
         "ritu",
@@ -288,6 +294,8 @@ class ProkeralaPanchangService:
     def _build_summary_rows(cls, sources: Dict[str, Any]) -> Dict[str, Any]:
         panchang = cls._unwrap_source_data(sources.get("panchang_advanced"))
         choghadiya = cls._unwrap_source_data(sources.get("choghadiya"))
+        auspicious_period = cls._unwrap_source_data(sources.get("auspicious_period"))
+        inauspicious_period = cls._unwrap_source_data(sources.get("inauspicious_period"))
         auspicious_yoga = cls._unwrap_source_data(sources.get("auspicious_yoga"))
         disha_shool = cls._unwrap_source_data(sources.get("disha_shool"))
         ritu = cls._unwrap_source_data(sources.get("ritu"))
@@ -300,6 +308,14 @@ class ProkeralaPanchangService:
             if not formatted:
                 return None
             return {"label": label, "value": formatted}
+
+        def period_row(label: str, source: Any) -> Optional[Dict[str, str]]:
+            rows = cls._flatten_for_display(source)
+            if not rows:
+                return None
+            first = rows[0]
+            formatted = f"{first.get('label', label)}: {first.get('value', '-')}"
+            return row(label, formatted)
 
         overview_candidates = [
             row("Tithi", cls._format_named_interval(panchang, "tithi")),
@@ -319,6 +335,8 @@ class ProkeralaPanchangService:
         ]
         insight_candidates = [
             row("Auspicious Yoga", cls._pick_first_value(auspicious_yoga, (("result",), ("name",), ("status",)))),
+            period_row("Auspicious Period", auspicious_period),
+            period_row("Inauspicious Period", inauspicious_period),
             row("Disha Shool", cls._pick_first_value(disha_shool, (("direction",), ("name",), ("result",)))),
             row("Ritu", cls._pick_first_value(ritu, (("name",), ("ritu",), ("season",)))),
             row("Solstice", cls._pick_first_value(solstice, (("name",), ("event",), ("type",)))),
