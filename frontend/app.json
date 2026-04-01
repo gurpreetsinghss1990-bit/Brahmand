@@ -16,7 +16,8 @@
         "NSPhotoLibraryUsageDescription": "Upload profile photo to your account",
         "NSCameraUsageDescription": "Take photos for profile and messages",
         "NSLocationWhenInUseUsageDescription": "Detect your location to join local communities",
-        "NSLocationAlwaysUsageDescription": "Detect your location to join local communities"
+        "NSLocationAlwaysUsageDescription": "Detect your location to join local communities",
+        "NSMicrophoneUsageDescription": "Use microphone for voice ordering"
       }
     },
     "android": {
@@ -72,7 +73,14 @@
           "locationAlwaysAndWhenInUsePermission": "Allow Sanatan Lok to use your location to join local communities."
         }
       ],
-      "@react-native-firebase/app"
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow Sanatan Lok to use microphone for voice ordering."
+        }
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth"
     ],
     "experiments": {
       "typedRoutes": true

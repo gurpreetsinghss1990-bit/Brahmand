@@ -24,8 +24,15 @@ import { VendorKYCModal } from '../../src/components/VendorKYCModal';
 export default function VendorDashboardScreen() {
   const router = useRouter();
   const { myVendor, fetchMyVendor, updateVendor, updateBusinessProfile } = useVendorStore();
-  const { logout } = useAuthStore();
+  const { logout, isLoading: authLoading, isAuthenticated } = useAuthStore();
   const [loading, setLoading] = useState(false);
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.replace('/auth' as any);
+    }
+  }, [authLoading, isAuthenticated, router]);
   const [kycVisible, setKycVisible] = useState(false);
   
   // Edit modals
@@ -70,6 +77,16 @@ export default function VendorDashboardScreen() {
       } },
     ]);
   };
+
+  if (authLoading || !myVendor) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!myVendor) {
     return (
@@ -474,6 +491,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   header: {
     flexDirection: 'row',

@@ -242,6 +242,89 @@ async def _sync_vendor_to_admin_queue(db: FirestoreDB, vendor_id: str):
     await db.set_document('vendor_admin_reviews', vendor_id, snapshot)
 
 
+def _get_configured_firebase_test_numbers() -> List[str]:
+    """Read configured Firebase testing numbers from env."""
+    raw_values = ['1234567890']
+    single = os.getenv('FIREBASE_TEST_PHONE_NUMBER', '')
+    multiple = os.getenv('FIREBASE_TEST_PHONE_NUMBERS', '')
+
+    if single:
+        raw_values.append(single)
+    if multiple:
+        raw_values.extend(multiple.split(','))
+
+    return [value.strip() for value in raw_values if value and value.strip()]
+
+
+def _normalize_phone(phone: str) -> str:
+    phone = str(phone or '').strip()
+    return ''.join(ch for ch in phone if ch.isdigit() or ch == '+')
+
+
+def _digits_only(phone: str) -> str:
+    return ''.join(ch for ch in str(phone or '') if ch.isdigit())
+
+
+def _is_configured_firebase_test_phone(phone: str) -> bool:
+    """Check if a phone matches configured Firebase testing numbers."""
+    configured = _get_configured_firebase_test_numbers()
+    if not configured:
+        return False
+
+    target_normalized = _normalize_phone(phone)
+    target_digits = _digits_only(phone)
+
+    for candidate in configured:
+        candidate_normalized = _normalize_phone(candidate)
+        candidate_digits = _digits_only(candidate)
+
+        if target_normalized and target_normalized == candidate_normalized:
+            return True
+
+        if target_digits and target_digits == candidate_digits:
+            return True
+
+        if len(target_digits) >= 10 and len(candidate_digits) >= 10 and target_digits[-10:] == candidate_digits[-10:]:
+            return True
+
+    return False
+
+
+async def _auto_approve_vendor_for_test_phone(db: FirestoreDB, user_id: str, phone: str) -> bool:
+    """Auto-approve vendor KYC for configured Firebase test numbers."""
+    if not _is_configured_firebase_test_phone(phone):
+        return False
+
+    vendor = await db.find_one('vendors', [('owner_id', '==', user_id)])
+    if not vendor:
+        return False
+
+    if vendor.get('kyc_status') == 'verified':
+        return True
+
+    reviewed_at = datetime.utcnow().isoformat()
+    review_note = 'Auto-approved for Firebase testing number'
+
+    await db.update_document('vendors', vendor['id'], {
+        'kyc_status': 'verified',
+        'kyc_verified_at': reviewed_at,
+        'kyc_reviewed_by': 'system_firebase_test',
+        'kyc_review_note': review_note,
+    })
+
+    await db.set_document('vendor_admin_reviews', vendor['id'], {
+        **_build_vendor_admin_snapshot({**vendor, 'id': vendor['id'], 'kyc_status': 'verified'}),
+        'review_status': 'approved',
+        'review_state': 'closed',
+        'reviewed_at': reviewed_at,
+        'reviewed_by': 'system_firebase_test',
+        'review_note': review_note,
+    })
+
+    logger.info('Auto-approved vendor %s for Firebase test phone %s', vendor['id'], phone)
+    return True
+
+
 # =================== MIDDLEWARE ===================
 
 app.add_middleware(
@@ -441,6 +524,8 @@ async def verify_firebase_token(request: dict, _: bool = Depends(auth_rate_limit
         user = await db.get_user_by_phone(phone)
         
         if user and user.get('sl_id'):
+            await _auto_approve_vendor_for_test_phone(db, user['id'], phone)
+
             # Existing user - return token
             token = create_jwt_token(user['id'], user['sl_id'])
             return {
@@ -497,6 +582,7 @@ async def verify_otp(request: OTPVerify, _: bool = Depends(auth_rate_limit)):
     # Check if user exists
     user = await db.get_user_by_phone(request.phone)
     if user and user.get('sl_id'):
+        await _auto_approve_vendor_for_test_phone(db, user['id'], request.phone)
         token = create_jwt_token(user['id'], user['sl_id'])
         return {
             "message": "Login successful",
@@ -1015,6 +1101,79 @@ async def reverse_geocode(request: dict):
         "area": "Unknown",
         "display_name": f"Location at {lat}, {lon}"
     }
+
+
+@api_router.post("/geocode/forward")
+async def forward_geocode(request: dict):
+    """Forward geocode place text to coordinates."""
+    import aiohttp
+
+    query = str(request.get("query") or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+
+    try:
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {
+            "q": query,
+            "format": "json",
+            "addressdetails": 1,
+            "limit": 5,
+            "accept-language": "en",
+        }
+        headers = {"User-Agent": "SanatanLok/2.2"}
+
+        def _build_result(data_rows: list) -> dict:
+            if not isinstance(data_rows, list) or not data_rows:
+                raise HTTPException(status_code=404, detail="Coordinates not found for this location")
+
+            first = data_rows[0]
+            lat = first.get("lat")
+            lon = first.get("lon")
+            if lat is None or lon is None:
+                raise HTTPException(status_code=404, detail="Coordinates not found for this location")
+
+            address = first.get("address", {}) if isinstance(first.get("address"), dict) else {}
+            return {
+                "latitude": float(lat),
+                "longitude": float(lon),
+                "display_name": first.get("display_name") or query,
+                "country": address.get("country", "Unknown").replace("India", "Bharat"),
+                "state": address.get("state", "Unknown"),
+                "city": address.get("city") or address.get("town") or address.get("municipality") or "Unknown",
+                "area": address.get("suburb") or address.get("neighbourhood") or "Unknown",
+            }
+
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(url, params=params, headers=headers) as resp:
+                    if resp.status != 200:
+                        raise HTTPException(status_code=502, detail=f"Forward geocode API returned status {resp.status}")
+                    data = await resp.json()
+                    return _build_result(data)
+        except HTTPException:
+            raise
+        except Exception as aiohttp_error:
+            logger.warning(f"Forward geocode aiohttp failed, trying requests fallback: {aiohttp_error}")
+
+            resp = await asyncio.to_thread(
+                requests.get,
+                url,
+                params=params,
+                headers=headers,
+                timeout=10,
+            )
+
+            if resp.status_code != 200:
+                raise HTTPException(status_code=502, detail=f"Forward geocode API returned status {resp.status_code}")
+
+            data = resp.json()
+            return _build_result(data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Forward geocoding error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to geocode this location")
 
 
 # =================== COMMUNITIES ===================
@@ -2482,6 +2641,84 @@ async def get_panchang():
     }
 
 
+def _is_prokerala_credit_exhausted(text: str) -> bool:
+    return "insufficient credit balance" in str(text or "").lower()
+
+
+def _build_local_panchang_fallback_payload(latitude: float, longitude: float, incoming_date: Optional[str], reason: str) -> dict:
+    try:
+        base_date = datetime.strptime(incoming_date, "%Y-%m-%d") if incoming_date else datetime.utcnow()
+    except Exception:
+        base_date = datetime.utcnow()
+
+    local = calculate_panchang(base_date, latitude, longitude)
+    overview = [
+        {"label": "Tithi", "value": local.get("tithi", "-")},
+        {"label": "Nakshatra", "value": local.get("nakshatra", "-")},
+        {"label": "Yoga", "value": local.get("yoga", "-")},
+        {"label": "Karana", "value": local.get("karana", "-")},
+    ]
+    timings = [
+        {"label": "Sunrise", "value": local.get("sunrise", "-")},
+        {"label": "Sunset", "value": local.get("sunset", "-")},
+        {"label": "Rahu Kaal", "value": local.get("rahu_kaal", "-")},
+        {"label": "Abhijit Muhurat", "value": local.get("abhijit_muhurat", "-")},
+    ]
+
+    return {
+        "date": local.get("date") or base_date.strftime("%Y-%m-%d"),
+        "coordinates": {"latitude": latitude, "longitude": longitude},
+        "timezone": settings.PROKERALA_DEFAULT_TZ,
+        "sources": {
+            "panchang_advanced": {
+                "data": {
+                    "tithi": {"name": local.get("tithi")},
+                    "nakshatra": {"name": local.get("nakshatra")},
+                    "yoga": {"name": local.get("yoga")},
+                    "karana": {"name": local.get("karana")},
+                    "sunrise": local.get("sunrise"),
+                    "sunset": local.get("sunset"),
+                    "rahu_kaal": local.get("rahu_kaal"),
+                    "abhijit_muhurat": local.get("abhijit_muhurat"),
+                    "moon_rashi": local.get("moon_rashi"),
+                    "paksha": local.get("paksha"),
+                }
+            }
+        },
+        "errors": {
+            "provider": reason,
+        },
+        "summary": {
+            "headline": f"{local.get('tithi', '-')} | {local.get('nakshatra', '-')}",
+            "overview": overview,
+            "timings": timings,
+            "insights": [
+                {"label": "Mode", "value": "Local Panchang fallback"}
+            ],
+        },
+        "detail_sections": [
+            {
+                "key": "panchang_advanced",
+                "title": "Advanced Panchang",
+                "rows": overview + timings,
+            }
+        ],
+        "available_endpoints": [
+            {"key": "panchang_advanced", "label": "Advanced Panchang"}
+        ],
+        "meta": {
+            "is_complete": True,
+            "fallback_mode": "local_calculation",
+            "fallback_reason": reason,
+        },
+        "fetched_at": datetime.utcnow().isoformat() + "Z",
+        "cache": {
+            "hit": False,
+            "fallback": True,
+        },
+    }
+
+
 @api_router.get("/panchang/prokerala")
 async def get_prokerala_panchang(
     date_str: Optional[str] = None,
@@ -2517,9 +2754,17 @@ async def get_prokerala_panchang(
             force_refresh=force_refresh,
             endpoint_keys=endpoint_keys,
         )
+
+        if not payload.get("sources"):
+            all_errors = " ".join(str(v).lower() for v in (payload.get("errors") or {}).values())
+            if _is_prokerala_credit_exhausted(all_errors):
+                return _build_local_panchang_fallback_payload(float(resolved_lat), float(resolved_lng), date_str, "Prokerala credit exhausted")
+
         return payload
     except Exception as exc:
         logger.error("Prokerala Panchang fetch failed: %s", exc)
+        if _is_prokerala_credit_exhausted(str(exc)):
+            return _build_local_panchang_fallback_payload(float(resolved_lat), float(resolved_lng), date_str, "Prokerala credit exhausted")
         raise HTTPException(status_code=502, detail=f"Panchang provider error: {exc}")
 
 
@@ -2556,6 +2801,16 @@ async def get_prokerala_panchang_summary(
             force_refresh=force_refresh,
         )
 
+        if not payload.get("sources"):
+            all_errors = " ".join(str(v).lower() for v in (payload.get("errors") or {}).values())
+            if _is_prokerala_credit_exhausted(all_errors):
+                payload = _build_local_panchang_fallback_payload(
+                    float(resolved_lat),
+                    float(resolved_lng),
+                    date_str,
+                    "Prokerala credit exhausted",
+                )
+
         from services.groq_service import get_groq_service
 
         try:
@@ -2571,6 +2826,17 @@ async def get_prokerala_panchang_summary(
         }
     except Exception as exc:
         logger.error("Prokerala Panchang summary fetch failed: %s", exc)
+        if _is_prokerala_credit_exhausted(str(exc)):
+            payload = _build_local_panchang_fallback_payload(
+                float(resolved_lat),
+                float(resolved_lng),
+                date_str,
+                "Prokerala credit exhausted",
+            )
+            return {
+                "panchang": payload,
+                "summary": "Provider credit is exhausted. Showing local Panchang fallback.",
+            }
         raise HTTPException(status_code=502, detail=f"Panchang provider error: {exc}")
 
 
@@ -2948,6 +3214,12 @@ async def create_vendor(data: VendorCreate, token_data: dict = Depends(verify_to
     db = await get_db()
     user_id = token_data["user_id"]
     user = await db.get_document('users', user_id)
+
+    normalized_categories = [str(category).strip() for category in (data.categories or []) if str(category).strip()]
+    owner_name = (data.owner_name or (user or {}).get('name') or 'Vendor Owner').strip()
+    full_address = (data.full_address or '').strip()
+    phone_number = (data.phone_number or (user or {}).get('phone') or '').strip()
+    years_in_business = max(0, int(data.years_in_business or 0))
     
     # Check if user already has a vendor
     existing = await db.find_one('vendors', [('owner_id', '==', user_id)])
@@ -2955,7 +3227,7 @@ async def create_vendor(data: VendorCreate, token_data: dict = Depends(verify_to
         raise HTTPException(status_code=400, detail="You already have a registered business")
     
     # Add new categories to global category list
-    for category in data.categories:
+    for category in normalized_categories:
         existing_cat = await db.find_one('vendor_categories', [('name', '==', category)])
         if not existing_cat:
             await db.create_document('vendor_categories', {'name': category, 'count': 1})
@@ -2966,13 +3238,13 @@ async def create_vendor(data: VendorCreate, token_data: dict = Depends(verify_to
     
     vendor_data = {
         "owner_id": user_id,
-        "owner_name": data.owner_name,
+        "owner_name": owner_name,
         "business_name": data.business_name,
-        "years_in_business": data.years_in_business,
-        "categories": data.categories,
-        "full_address": data.full_address,
+        "years_in_business": years_in_business,
+        "categories": normalized_categories,
+        "full_address": full_address,
         "location_link": data.location_link,
-        "phone_number": data.phone_number,
+        "phone_number": phone_number,
         "latitude": data.latitude,
         "longitude": data.longitude,
         "photos": data.photos if data.photos else [],
@@ -2991,6 +3263,11 @@ async def create_vendor(data: VendorCreate, token_data: dict = Depends(verify_to
     
     # Update user to mark as vendor
     await db.update_document('users', user_id, {'is_vendor': True, 'vendor_id': vendor_id})
+
+    user_phone = user.get('phone') if user else None
+    if user_phone:
+        await _auto_approve_vendor_for_test_phone(db, user_id, user_phone)
+
     await _sync_vendor_to_admin_queue(db, vendor_id)
     
     logger.info(f"Vendor created by {user_id}: {data.business_name}")
@@ -3125,7 +3402,7 @@ async def set_vendor_storage_owner(vendor_id: str, data: dict, token_data: dict 
 
 @api_router.put("/vendors/{vendor_id}/business/profile")
 async def update_vendor_business_profile(vendor_id: str, data: dict = Body(...), token_data: dict = Depends(verify_token)):
-    """Update approved vendor's public business profile info (menu + delivery toggle)."""
+    """Update approved vendor's public business profile info (menu + delivery toggle + hours + offers + social + notes)."""
     db = await get_db()
     user_id = token_data["user_id"]
 
@@ -3141,6 +3418,12 @@ async def update_vendor_business_profile(vendor_id: str, data: dict = Body(...),
 
     menu_items = data.get('menu_items')
     offers_home_delivery = data.get('offers_home_delivery')
+    offers_cash_on_delivery = data.get('offers_cash_on_delivery')
+    business_hours = data.get('business_hours')
+    notes = data.get('notes')
+    offers = data.get('offers')
+    website_link = data.get('website_link')
+    social_media = data.get('social_media')
 
     update_data = {}
 
@@ -3155,6 +3438,29 @@ async def update_vendor_business_profile(vendor_id: str, data: dict = Body(...),
 
     if offers_home_delivery is not None:
         update_data['offers_home_delivery'] = bool(offers_home_delivery)
+
+    if offers_cash_on_delivery is not None:
+        update_data['offers_cash_on_delivery'] = bool(offers_cash_on_delivery)
+
+    if business_hours is not None:
+        update_data['business_hours'] = str(business_hours).strip()
+
+    if notes is not None:
+        update_data['notes'] = str(notes).strip()
+
+    if offers is not None:
+        update_data['offers'] = str(offers).strip()
+
+    if website_link is not None:
+        update_data['website_link'] = str(website_link).strip()
+
+    if social_media is not None:
+        if isinstance(social_media, dict):
+            update_data['social_media'] = {
+                'facebook': social_media.get('facebook', '').strip() if social_media.get('facebook') else '',
+                'instagram': social_media.get('instagram', '').strip() if social_media.get('instagram') else '',
+                'whatsapp': social_media.get('whatsapp', '').strip() if social_media.get('whatsapp') else '',
+            }
 
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid fields provided")
@@ -3310,7 +3616,12 @@ async def upload_vendor_kyc_file(
 
 
 @api_router.post("/vendors/{vendor_id}/kyc/vision-extract")
-async def extract_kyc_text_from_image(vendor_id: str, file: UploadFile = File(...), token_data: dict = Depends(verify_token)):
+async def extract_kyc_text_from_image(
+    vendor_id: str,
+    file: Optional[UploadFile] = File(None),
+    image_base64: Optional[str] = Form(None),
+    token_data: dict = Depends(verify_token)
+):
     """Use Google Cloud Vision to extract text from KYC images (Aadhaar/PAN)."""
     if vision is None:
         raise HTTPException(status_code=501, detail="Google Cloud Vision client library is not installed")
@@ -3325,9 +3636,19 @@ async def extract_kyc_text_from_image(vendor_id: str, file: UploadFile = File(..
     if vendor.get('owner_id') != user_id:
         raise HTTPException(status_code=403, detail="Only the owner can extract text")
 
-    contents = await file.read()
+    contents = b""
+    if file is not None:
+        contents = await file.read()
+
+    if (not contents) and image_base64:
+        try:
+            normalized = image_base64.split(',', 1)[-1]
+            contents = base64.b64decode(normalized)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid image_base64 payload")
+
     if not contents:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        raise HTTPException(status_code=400, detail="No image provided. Send multipart field 'file' or form field 'image_base64'.")
 
     vision_api_key = os.getenv('GOOGLE_CLOUD_VISION_API_KEY')
     if vision_api_key:
@@ -4173,6 +4494,39 @@ async def respond_to_sos(sos_id: str, response: str = Body(..., embed=True), tok
     
     logger.info(f"User {user_id} responded to SOS {sos_id}: {response}")
     return {"message": f"Response recorded: {response}"}
+
+
+@api_router.post("/speech/transcribe")
+async def transcribe_audio(
+    audio_base64: str = Body(..., embed=True),
+    language_code: str = "en-IN"
+):
+    """Transcribe audio using Google Cloud Speech-to-Text v2"""
+    try:
+        from services.speech_service import speech_service
+        
+        if not audio_base64:
+            raise HTTPException(status_code=400, detail="Audio data is required")
+        
+        normalized = audio_base64.split(',', 1)[-1] if ',' in audio_base64 else audio_base64
+        
+        try:
+            audio_content = base64.b64decode(normalized)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid base64 audio data")
+        
+        transcript = await speech_service.transcribe_audio(audio_content, language_code)
+        
+        if transcript is None:
+            raise HTTPException(status_code=500, detail="Failed to transcribe audio")
+        
+        return {"transcript": transcript}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Speech transcription error: {e}")
+        raise HTTPException(status_code=500, detail="Speech transcription failed")
 
 
 # =================== SPIRITUAL ENGINE ===================

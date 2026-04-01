@@ -426,12 +426,12 @@ class HelpRequestResponse(BaseModel):
 
 class VendorCreate(BaseModel):
     business_name: str = Field(..., min_length=2, max_length=200)
-    owner_name: str = Field(..., min_length=2, max_length=100)
-    years_in_business: int = Field(ge=0, le=100)
-    categories: List[str] = Field(..., min_items=1, max_items=5)
-    full_address: str = Field(..., min_length=10, max_length=500)
+    owner_name: str = Field(default="Vendor Owner", min_length=2, max_length=100)
+    years_in_business: int = Field(default=0, ge=0, le=100)
+    categories: List[str] = Field(default_factory=list, max_items=5)
+    full_address: str = Field(default="", max_length=500)
     location_link: Optional[str] = None
-    phone_number: str
+    phone_number: str = ""
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     photos: Optional[List[str]] = []

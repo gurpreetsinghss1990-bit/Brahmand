@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -11,13 +13,14 @@ import {
   View,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { getProkeralaPanchang, askProkeralaAstrology } from '../src/services/api';
+import { getProkeralaPanchang, askProkeralaAstrology, reverseGeocode, forwardGeocode } from '../src/services/api';
 import { COLORS, SPACING, BORDER_RADIUS } from '../src/constants/theme';
 import { useAuthStore } from '../src/store/authStore';
+import LocationService from '../src/services/location';
 
 type PanchangRow = {
   label: string;
@@ -28,6 +31,7 @@ const DEFAULT_ENDPOINTS = 'panchang_advanced,choghadiya,tara_bala,chandra_bala,a
 
 export default function PanchangScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ lat?: string; lng?: string; needsLocation?: string }>();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const userLocation = (user as any)?.home_location;
@@ -53,6 +57,94 @@ export default function PanchangScreen() {
   const [chatMessages, setChatMessages] = useState<{ question: string; answer: string }[]>([]);
   const isMountedRef = React.useRef(true);
   const glowAnim = useRef(new Animated.Value(0.92)).current;
+
+  const parsedLat = useMemo(() => {
+    const value = Number(params.lat);
+    return Number.isFinite(value) ? value : undefined;
+  }, [params.lat]);
+
+  const parsedLng = useMemo(() => {
+    const value = Number(params.lng);
+    return Number.isFinite(value) ? value : undefined;
+  }, [params.lng]);
+
+  const reverseGeocodeLabel = useCallback(async (lat: number, lng: number) => {
+    try {
+      const response = await reverseGeocode(lat, lng);
+      const data = response?.data || {};
+      return [data.area, data.city, data.state].filter(Boolean).join(', ') || data.display_name || 'Current location';
+    } catch {
+      return 'Current location';
+    }
+  }, []);
+
+  const resolveCoordinatesFromText = useCallback(async (placeText: string) => {
+    const candidates = [placeText, `${placeText}, India`, `${placeText}, Bharat`];
+
+    for (const candidate of candidates) {
+      try {
+        const results = await Location.geocodeAsync(candidate);
+        if (Array.isArray(results) && results.length > 0) {
+          return { lat: results[0].latitude, lng: results[0].longitude };
+        }
+      } catch {
+        // Try next fallback source
+      }
+    }
+
+    try {
+      const response = await forwardGeocode(placeText);
+      const data = response?.data || {};
+      if (typeof data.latitude === 'number' && typeof data.longitude === 'number') {
+        return { lat: data.latitude, lng: data.longitude };
+      }
+    } catch {
+      // Continue to direct fallback
+    }
+
+    const q = encodeURIComponent(placeText);
+    const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${q}`);
+    const data = await resp.json();
+    if (Array.isArray(data) && data.length > 0) {
+      const lat = parseFloat(data[0].lat);
+      const lng = parseFloat(data[0].lon);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        return { lat, lng };
+      }
+    }
+
+    return null;
+  }, []);
+
+  const requestCurrentLocationForPanchang = useCallback(async (showPromptOnFailure = false) => {
+    try {
+      const permissionGranted = await LocationService.ensureForegroundPermission();
+      if (!permissionGranted) {
+        if (showPromptOnFailure) {
+          Alert.alert(
+            'Location Permission Needed',
+            'Please allow location access in Safari settings to fetch Panchang for your current place.'
+          );
+        }
+        return null;
+      }
+
+      const location = await LocationService.getCurrentPosition({
+        enableHighAccuracy: false,
+        timeout: 15000,
+        maximumAge: 10000,
+      });
+
+      const lat = location.coords.latitude;
+      const lng = location.coords.longitude;
+      return { lat, lng };
+    } catch {
+      if (showPromptOnFailure) {
+        Alert.alert('Location Error', 'Could not fetch your current location. Please enable location and try again.');
+      }
+      return null;
+    }
+  }, []);
 
   const handleBack = useCallback(() => {
     router.replace('/(tabs)');
@@ -87,11 +179,37 @@ export default function PanchangScreen() {
 
   useEffect(() => {
     isMountedRef.current = true;
-    fetchBasePanchang(false);
+
+    const initializePanchang = async () => {
+      let initialCoords: { lat?: number; lng?: number } | null = null;
+
+      if (typeof parsedLat === 'number' && typeof parsedLng === 'number') {
+        initialCoords = { lat: parsedLat, lng: parsedLng };
+      } else if (typeof activeCoords.lat === 'number' && typeof activeCoords.lng === 'number') {
+        initialCoords = { lat: activeCoords.lat, lng: activeCoords.lng };
+      } else {
+        initialCoords = await requestCurrentLocationForPanchang(Platform.OS === 'web' || params.needsLocation === '1');
+      }
+
+      if (initialCoords && typeof initialCoords.lat === 'number' && typeof initialCoords.lng === 'number') {
+        setActiveCoords(initialCoords);
+        const label = await reverseGeocodeLabel(initialCoords.lat, initialCoords.lng);
+        if (isMountedRef.current) {
+          setActiveLocationLabel(label || 'Current location');
+        }
+        await fetchBasePanchang(false, initialCoords);
+        return;
+      }
+
+      await fetchBasePanchang(false);
+    };
+
+    initializePanchang();
+
     return () => {
       isMountedRef.current = false;
     };
-  }, [fetchBasePanchang]);
+  }, [fetchBasePanchang, params.needsLocation, parsedLat, parsedLng, activeCoords.lat, activeCoords.lng, requestCurrentLocationForPanchang, reverseGeocodeLabel]);
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -249,7 +367,7 @@ export default function PanchangScreen() {
     const rows: PanchangRow[] = [];
     const seen = new Set<string>();
 
-    const visit = (node: any, prefix?: string) => {
+    const visit = (node: any, prefix?: string, typeInfo?: string) => {
       if (!node || rows.length >= 8) return;
 
       if (Array.isArray(node)) {
@@ -259,11 +377,46 @@ export default function PanchangScreen() {
 
       if (typeof node !== 'object') return;
 
+      // Get type info (Auspicious/Inauspicious) from node
+      const nodeType = node?.type === 'Auspicious' || node?.type === 'Inauspicious' ? node.type : typeInfo;
+      const typePrefix = nodeType ? `[${nodeType}] ` : '';
+
       const explicitName =
         (typeof node?.name === 'string' && node.name.trim()) ||
         (typeof node?.title === 'string' && node.title.trim()) ||
         (typeof node?.label === 'string' && node.label.trim()) ||
         null;
+      
+      // Handle period array format (from prokerala API: { period: [{ start, end }] })
+      const periodArray = node?.period;
+      if (Array.isArray(periodArray) && periodArray.length > 0) {
+        periodArray.forEach((periodItem: any) => {
+          const pStart =
+            formatClock(periodItem?.start) ||
+            formatClock(periodItem?.start_time) ||
+            formatClock(periodItem?.from) ||
+            null;
+          const pEnd =
+            formatClock(periodItem?.end) ||
+            formatClock(periodItem?.end_time) ||
+            formatClock(periodItem?.to) ||
+            null;
+          
+          const label = explicitName || prefix || fallbackLabel;
+          const fullLabel = typePrefix + label;
+          
+          if (label && (pStart || pEnd)) {
+            const value = pStart && pEnd ? `${pStart} - ${pEnd}` : pStart || pEnd || '';
+            const key = `${fullLabel}:${value}`;
+            if (!seen.has(key) && value) {
+              seen.add(key);
+              rows.push({ label: fullLabel, value });
+            }
+          }
+        });
+      }
+
+      // Also check for direct start/end fields
       const start =
         formatClock(node?.start) ||
         formatClock(node?.start_time) ||
@@ -278,20 +431,24 @@ export default function PanchangScreen() {
         null;
 
       const label = explicitName || prefix || fallbackLabel;
-      if (label && (start || end)) {
+      const fullLabel = typePrefix + label;
+      if (label && (start || end) && !periodArray?.length) {
         const value = start && end ? `${start} - ${end}` : start || end || '';
-        const key = `${label}:${value}`;
+        const key = `${fullLabel}:${value}`;
         if (!seen.has(key) && value) {
           seen.add(key);
-          rows.push({ label, value });
+          rows.push({ label: fullLabel, value });
         }
       }
 
-      const preferredKeys = ['periods', 'items', 'data', 'details', 'current', 'active', 'present', 'value', 'list'];
+      // Pass type info to nested objects
+      const nestedType = nodeType || (explicitName ? nodeType : undefined);
+      
+      const preferredKeys = ['periods', 'items', 'data', 'details', 'current', 'active', 'present', 'value', 'list', 'muhurat'];
       preferredKeys.forEach((key) => {
         const nestedValue = node?.[key];
         if (nestedValue && typeof nestedValue === 'object') {
-          visit(nestedValue, explicitName || prefix);
+          visit(nestedValue, explicitName || prefix, nestedType);
         }
       });
 
@@ -299,7 +456,7 @@ export default function PanchangScreen() {
         if (preferredKeys.includes(key) || !nestedValue || typeof nestedValue !== 'object') {
           return;
         }
-        visit(nestedValue, explicitName || prefix || toTitle(key));
+        visit(nestedValue, explicitName || prefix || toTitle(key), nestedType);
       });
     };
 
@@ -414,6 +571,32 @@ export default function PanchangScreen() {
     ...summaryInauspiciousRows,
   ]).slice(0, 8);
 
+  const fallbackPanchangRows = dedupeRows(
+    flattenDisplayRows(panchangSource, 'Panchang')
+  ).slice(0, 12);
+
+  const providerErrorMessages = useMemo(() => {
+    const errors = payload?.errors;
+    if (!errors || typeof errors !== 'object') {
+      return [] as string[];
+    }
+
+    return Object.entries(errors)
+      .map(([key, value]) => {
+        const text = typeof value === 'string' ? value : JSON.stringify(value);
+        return text ? `${key}: ${text}` : null;
+      })
+      .filter((item): item is string => !!item)
+      .slice(0, 3);
+  }, [payload]);
+
+  const hasDisplayRows =
+    timingRows.length > 0 ||
+    overviewRows.length > 0 ||
+    auspiciousPeriodRows.length > 0 ||
+    inauspiciousPeriodRows.length > 0 ||
+    fallbackPanchangRows.length > 0;
+
   const handleCustomLocationSubmit = async () => {
     const placeText = customLocation.trim();
     if (!placeText || locationLoading) return;
@@ -421,28 +604,9 @@ export default function PanchangScreen() {
     setLocationLoading(true);
     setError('');
     try {
-      let lat: number | undefined;
-      let lng: number | undefined;
-
-      try {
-        const results = await Location.geocodeAsync(placeText);
-        if (Array.isArray(results) && results.length > 0) {
-          lat = results[0].latitude;
-          lng = results[0].longitude;
-        }
-      } catch {
-        try {
-          const q = encodeURIComponent(placeText);
-          const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${q}`);
-          const data = await resp.json();
-          if (Array.isArray(data) && data.length > 0) {
-            lat = parseFloat(data[0].lat);
-            lng = parseFloat(data[0].lon);
-          }
-        } catch {
-          // ignore fallback errors
-        }
-      }
+      const result = await resolveCoordinatesFromText(placeText);
+      const lat = result?.lat;
+      const lng = result?.lng;
 
       if (typeof lat !== 'number' || typeof lng !== 'number') {
         setError('Could not find coordinates for that location.');
@@ -635,6 +799,38 @@ export default function PanchangScreen() {
             </View>
           </View>
         ) : null}
+
+        {!timingRows.length && !overviewRows.length && !auspiciousPeriodRows.length && !inauspiciousPeriodRows.length && fallbackPanchangRows.length ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Panchang Details</Text>
+            <View style={styles.card}>
+              {fallbackPanchangRows.map((row) => (
+                <InfoRow key={`fallback-${row.label}-${row.value}`} label={row.label} value={row.value} icon="sparkles" />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {!hasDisplayRows ? (
+          <View style={styles.section}>
+            <View style={styles.emptyCard}>
+              <Ionicons name="information-circle" size={20} color={COLORS.primary} />
+              <Text style={styles.emptyTitle}>Panchang details are temporarily unavailable</Text>
+              <Text style={styles.emptyText}>
+                Try pull-to-refresh, or enter a custom location like Delhi, Mumbai, or Kolkata.
+              </Text>
+              {providerErrorMessages.length ? (
+                <View style={styles.emptyErrorList}>
+                  {providerErrorMessages.map((message, index) => (
+                    <Text key={`provider-error-${index}`} style={styles.emptyErrorText}>
+                      • {message}
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
       </ScrollView>
 
       <View style={[styles.stickyComposerWrap, { paddingBottom: Math.max(insets.bottom, SPACING.sm) }]}>
@@ -817,6 +1013,33 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.sm,
     color: COLORS.primary,
     fontWeight: '600',
+  },
+  emptyCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    padding: SPACING.md,
+    gap: SPACING.sm,
+  },
+  emptyTitle: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  emptyText: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  emptyErrorList: {
+    marginTop: SPACING.xs,
+    gap: 4,
+  },
+  emptyErrorText: {
+    color: COLORS.error,
+    fontSize: 12,
+    lineHeight: 18,
   },
   chatAura: {
     position: 'absolute',

@@ -10,6 +10,7 @@ passlib
 Pillow
 google-cloud-firestore
 google-cloud-vision
+google-cloud-speech
 
 twilio
 requests

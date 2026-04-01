@@ -28,7 +28,7 @@ const TABS = ['Nearby', 'Pooja', 'Grocery', 'Restaurant', 'Festival'];
 
 export default function VendorScreen() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, isLoading: authLoading, isAuthenticated } = useAuthStore();
   const userId = user?.id;
   const { 
     vendors, 
@@ -47,6 +47,8 @@ export default function VendorScreen() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [filteredCategories, setFilteredCategories] = useState<string[]>([]);
+  const [searchCategory, setSearchCategory] = useState<string>('All');
+  const [showCategoryFilter, setShowCategoryFilter] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   const homeLocation = (user as any)?.home_location;
@@ -117,11 +119,17 @@ export default function VendorScreen() {
   }, [fetchVendors, fetchMyVendor, fetchCategories, hasHomeCoordinates, homeLatitude, homeLongitude]);
 
   useEffect(() => {
+    // Redirect to auth if not authenticated after auth is loaded
+    if (!authLoading && !isAuthenticated) {
+      router.replace('/auth' as any);
+      return;
+    }
+    
     if (!userId) {
       return;
     }
     loadData();
-  }, [loadData, userId]);
+  }, [loadData, userId, authLoading, isAuthenticated, router]);
 
   useEffect(() => {
     if (searchTerm) {
@@ -134,10 +142,28 @@ export default function VendorScreen() {
     }
   }, [searchTerm, categories]);
 
-  const displayVendors = useVendorStore.getState().getFilteredVendors(
-    activeTab === 'Nearby' ? undefined : activeTab,
-    searchTerm
-  );
+  const displayVendors = React.useMemo(() => {
+    let filtered = vendors || [];
+    const effectiveCategory = searchCategory !== 'All' ? searchCategory : activeTab;
+
+    if (effectiveCategory && effectiveCategory !== 'Nearby') {
+      const lowerCategory = effectiveCategory.toLowerCase();
+      filtered = filtered.filter((v) => {
+        const categories = v.categories || [];
+        return categories.some((c) => (c || '').toLowerCase().includes(lowerCategory));
+      });
+    }
+
+    if (searchTerm && searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter((v) => {
+        const name = (v.business_name || '').toLowerCase();
+        return name.includes(term);
+      });
+    }
+
+    return filtered.sort((a, b) => (a.distance || 9999) - (b.distance || 9999));
+  }, [vendors, activeTab, searchTerm, searchCategory]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -148,19 +174,15 @@ export default function VendorScreen() {
   const handleRegisterVendor = async (data: any) => {
     try {
       await createVendor({
-        business_name: data.businessName,
-        owner_name: data.ownerName,
-        years_in_business: data.yearsInBusiness || 0,
+        businessName: data.businessName,
+        ownerName: data.ownerName,
+        yearsInBusiness: data.yearsInBusiness || 0,
         categories: data.categories,
-        full_address: data.address,
-        location_link: data.locationLink || undefined,
-        phone_number: data.phoneNumber,
+        address: data.address,
+        locationLink: data.locationLink || undefined,
+        phoneNumber: data.phoneNumber,
         latitude: data.latitude || undefined,
         longitude: data.longitude || undefined,
-        photos: [],
-        aadhar_url: null,
-        pan_url: null,
-        face_scan_url: null
       });
       Alert.alert('Success', 'Your business has been registered!');
       setShowRegistrationModal(false);
@@ -259,6 +281,17 @@ export default function VendorScreen() {
     );
   };
 
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Top Tabs */}
@@ -287,24 +320,77 @@ export default function VendorScreen() {
       {/* Search Bar */}
       {showSearch && (
         <View style={styles.searchContainer}>
-          <View style={styles.searchInputContainer}>
-            <Ionicons name="search" size={18} color={COLORS.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search by category (Yoga, Gym, Restaurant...)"
-              placeholderTextColor={COLORS.textLight}
-              value={searchTerm}
-              onChangeText={setSearchTerm}
-            />
-            {searchTerm && (
-              <TouchableOpacity onPress={() => setSearchTerm('')}>
-                <Ionicons name="close-circle" size={18} color={COLORS.textLight} />
-              </TouchableOpacity>
-            )}
+          <View style={styles.searchInputRow}>
+            <View style={styles.searchInputContainer}>
+              <Ionicons name="search" size={18} color={COLORS.textLight} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search by business name or category"
+                placeholderTextColor={COLORS.textLight}
+                value={searchTerm}
+                onChangeText={setSearchTerm}
+                returnKeyType="search"
+                blurOnSubmit={false}
+              />
+              {searchTerm && (
+                <TouchableOpacity onPress={() => setSearchTerm('')}>
+                  <Ionicons name="close-circle" size={18} color={COLORS.textLight} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={styles.filterIconButton}
+              onPress={() => setShowCategoryFilter((prev) => !prev)}
+            >
+              <Ionicons name="filter" size={22} color={COLORS.primary} />
+            </TouchableOpacity>
           </View>
-          
+
+          {searchCategory !== 'All' && (
+            <View style={styles.activeFilterContainer}>
+              <Text style={styles.activeFilterText}>Category: {searchCategory}</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setSearchCategory('All');
+                  setShowCategoryFilter(false);
+                }}
+              >
+                <Ionicons name="close-circle" size={16} color={COLORS.textLight} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {showCategoryFilter && (
+            <View style={styles.filterPanel}>
+              <View style={styles.chipsContainer}>
+                <TouchableOpacity
+                  style={[styles.categoryChip, searchCategory === 'All' && styles.categoryChipActive]}
+                  onPress={() => {
+                    setSearchCategory('All');
+                    setShowCategoryFilter(false);
+                  }}
+                >
+                  <Text style={[styles.categoryChipText, searchCategory === 'All' && styles.categoryChipTextActive]}>All</Text>
+                </TouchableOpacity>
+                {categories.map((cat) => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[styles.categoryChip, searchCategory === cat && styles.categoryChipActive]}
+                    onPress={() => {
+                      setSearchCategory(cat);
+                      setShowCategoryFilter(false);
+                    }}
+                  >
+                    <Text style={[styles.categoryChipText, searchCategory === cat && styles.categoryChipTextActive]}>{cat}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
           {/* Category Suggestions */}
-          {filteredCategories.length > 0 && (
+          {filteredCategories.length > 0 && !showCategoryFilter && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsScroll}>
               {filteredCategories.slice(0, 5).map((cat) => (
                 <TouchableOpacity
@@ -316,6 +402,20 @@ export default function VendorScreen() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
+          )}
+
+          {/* Active Filter Badge */}
+          {searchCategory !== 'All' && !showCategoryFilter && (
+            <View style={styles.activeFilterContainer}>
+              <Text style={styles.activeFilterText}>Filtered: {searchCategory}</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setSearchCategory('All');
+                }}
+              >
+                <Ionicons name="close-circle" size={16} color={COLORS.primary} />
+              </TouchableOpacity>
+            </View>
           )}
         </View>
       )}
@@ -444,6 +544,129 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.md,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    flex: 1,
+  },
+  searchInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.sm,
+  },
+  filterIconButton: {
+    width: 40,
+    height: 40,
+    backgroundColor: `${COLORS.primary}10`,
+    borderRadius: BORDER_RADIUS.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  activeFilterContainer: {
+    marginTop: SPACING.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  activeFilterText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    marginRight: SPACING.xs,
+  },
+  filterPanel: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    padding: SPACING.sm,
+    marginTop: SPACING.sm,
+    width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    maxHeight: 400,
+  },
+  filterModalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  filterModal: {
+    width: '90%',
+    maxHeight: '65%',
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+  },
+  filterModalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: SPACING.sm,
+    color: COLORS.text,
+  },
+  filterOptionsList: {
+    marginBottom: SPACING.sm,
+  },
+  chipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    paddingVertical: SPACING.xs,
+  },
+  filterOption: {
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+    marginBottom: SPACING.xs,
+    backgroundColor: COLORS.background,
+  },
+  filterOptionActive: {
+    backgroundColor: `${COLORS.primary}20`,
+  },
+  filterOptionText: {
+    color: COLORS.text,
+    fontSize: 14,
+  },
+  categoryChip: {
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    borderRadius: 20,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  categoryChipActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  categoryChipText: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  categoryChipTextActive: {
+    color: COLORS.surface,
+  },
+  filterActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  filterActionButton: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.sm,
+  },
+  filterActionText: {
+    color: COLORS.surface,
+    fontWeight: '600',
   },
   searchInput: {
     flex: 1,

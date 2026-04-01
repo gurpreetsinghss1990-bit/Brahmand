@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '../../src/constants/theme';
 import { useVendorStore } from '../../src/store/vendorStore';
 import { formatDistance } from '../../src/utils/formatDistance';
+import VoiceOrder from '../../src/components/VoiceOrder';
 
 const TRUST_LABELS = {
   trusted: { label: 'Trusted Vendor', color: COLORS.success, icon: 'shield-checkmark' },
@@ -175,19 +176,110 @@ export default function VendorProfileScreen() {
         {/* Menu */}
         {menuItems.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>What they offer</Text>
+            <Text style={styles.sectionTitle}>Menu</Text>
             {menuItems.map((item, index) => (
               <Text key={`${item}-${index}`} style={styles.hoursText}>• {item}</Text>
             ))}
+            
+            <View style={{ marginTop: SPACING.md }}>
+              <VoiceOrder 
+                menuItems={menuItems} 
+                vendorPhone={vendor.phone_number}
+                vendorName={vendor.business_name}
+              />
+            </View>
           </View>
         )}
 
-        <View style={styles.offerSection}>
-          <Ionicons name="bicycle" size={20} color={COLORS.warning} />
-          <Text style={styles.offerText}>
-            Home delivery: {vendor.offers_home_delivery ? 'Yes' : 'No'}
-          </Text>
+        {/* Business Hours */}
+        {vendor.business_hours && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeaderRow}>
+              <Ionicons name="time" size={18} color={COLORS.primary} />
+              <Text style={styles.sectionTitle}>Business Hours</Text>
+            </View>
+            <Text style={styles.descriptionText}>{vendor.business_hours}</Text>
+          </View>
+        )}
+
+        {/* Offers & Deals */}
+        {vendor.offers && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeaderRow}>
+              <Ionicons name="pricetag" size={18} color={COLORS.warning} />
+              <Text style={styles.sectionTitle}>Offers & Deals</Text>
+            </View>
+            <Text style={styles.descriptionText}>{vendor.offers}</Text>
+          </View>
+        )}
+
+        {/* Delivery Options */}
+        <View style={styles.deliverySection}>
+          {(vendor.offers_home_delivery || vendor.offers_cash_on_delivery) && (
+            <Text style={styles.sectionTitle}>Delivery Options</Text>
+          )}
+          {vendor.offers_home_delivery && (
+            <View style={styles.deliveryBadge}>
+              <Ionicons name="bicycle" size={16} color={COLORS.success} />
+              <Text style={styles.deliveryText}>Home Delivery</Text>
+            </View>
+          )}
+          {vendor.offers_cash_on_delivery && (
+            <View style={styles.deliveryBadge}>
+              <Ionicons name="cash" size={16} color={COLORS.success} />
+              <Text style={styles.deliveryText}>Cash on Delivery</Text>
+            </View>
+          )}
         </View>
+
+        {/* Website & Social Media */}
+        {(vendor.website_link || vendor.social_media?.facebook || vendor.social_media?.instagram || vendor.social_media?.whatsapp) && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Connect</Text>
+            
+            {vendor.website_link && (
+              <TouchableOpacity style={styles.socialRow} onPress={() => vendor.website_link && Linking.openURL(vendor.website_link)}>
+                <Ionicons name="globe" size={18} color={COLORS.primary} />
+                <Text style={styles.linkText}>{vendor.website_link}</Text>
+              </TouchableOpacity>
+            )}
+            
+            {vendor.social_media?.facebook && (
+              <TouchableOpacity style={styles.socialRow} onPress={() => vendor.social_media?.facebook && Linking.openURL(vendor.social_media.facebook)}>
+                <Ionicons name="logo-facebook" size={18} color="#1877F2" />
+                <Text style={styles.linkText}>Facebook</Text>
+              </TouchableOpacity>
+            )}
+            
+            {vendor.social_media?.instagram && (
+              <TouchableOpacity style={styles.socialRow} onPress={() => {
+                const handle = vendor.social_media?.instagram?.replace('@', '');
+                Linking.openURL(`https://instagram.com/${handle}`);
+              }}>
+                <Ionicons name="logo-instagram" size={18} color="#E4405F" />
+                <Text style={styles.linkText}>{vendor.social_media.instagram}</Text>
+              </TouchableOpacity>
+            )}
+            
+            {vendor.social_media?.whatsapp && (
+              <TouchableOpacity style={styles.socialRow} onPress={() => vendor.social_media?.whatsapp && Linking.openURL(`https://wa.me/${vendor.social_media.whatsapp}`)}>
+                <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+                <Text style={styles.linkText}>WhatsApp</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* Notes */}
+        {vendor.notes && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeaderRow}>
+              <Ionicons name="document-text" size={18} color={COLORS.textSecondary} />
+              <Text style={styles.sectionTitle}>Additional Notes</Text>
+            </View>
+            <Text style={styles.descriptionText}>{vendor.notes}</Text>
+          </View>
+        )}
 
         <View style={{ height: actionBarHeight + SPACING.lg }} />
       </ScrollView>
@@ -471,5 +563,48 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  descriptionText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    lineHeight: 22,
+  },
+  deliverySection: {
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  deliveryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    backgroundColor: `${COLORS.success}15`,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    marginTop: SPACING.sm,
+  },
+  deliveryText: {
+    fontSize: 14,
+    color: COLORS.success,
+    fontWeight: '500',
+  },
+  socialRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingVertical: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  linkText: {
+    fontSize: 14,
+    color: COLORS.primary,
+    flex: 1,
   },
 });

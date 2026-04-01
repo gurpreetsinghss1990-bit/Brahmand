@@ -1,5 +1,6 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 // Use localhost for local dev without .env
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8000';
@@ -151,6 +152,9 @@ export const setupDualLocation = (locations: {
 
 export const reverseGeocode = (latitude: number, longitude: number) => 
   api.post('/geocode/reverse', { latitude, longitude });
+
+export const forwardGeocode = (query: string) =>
+  api.post('/geocode/forward', { query });
 
 export const searchUserBySLId = (slId: string) => 
   api.get(`/user/search/${slId}`);
@@ -526,18 +530,54 @@ export const updateVendorBusinessProfile = (
   data: { menu_items?: string[]; offers_home_delivery?: boolean }
 ) => api.put(`/vendors/${vendorId}/business/profile`, data);
 
+const appendMultipartFile = async (
+  formData: FormData,
+  fieldName: string,
+  file: { uri: string; name: string; type: string }
+) => {
+  if (Platform.OS === 'web') {
+    const response = await fetch(file.uri);
+    const blob = await response.blob();
+    const webFile = new File([blob], file.name || 'upload.jpg', { type: file.type || blob.type || 'image/jpeg' });
+    formData.append(fieldName, webFile);
+    return;
+  }
+
+  formData.append(fieldName, file as any);
+};
+
+const blobToDataUrl = (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to convert image blob to base64'));
+    reader.readAsDataURL(blob);
+  });
+
+const getImageBase64FromUri = async (file: { uri: string; type?: string }) => {
+  const response = await fetch(file.uri);
+  const blob = await response.blob();
+  const dataUrl = await blobToDataUrl(blob);
+  if (dataUrl && dataUrl.startsWith('data:')) {
+    return dataUrl;
+  }
+  return `data:${file.type || blob.type || 'image/jpeg'};base64,${dataUrl}`;
+};
+
 export const uploadVendorBusinessImage = (
   vendorId: string,
   slot: number,
   file: { uri: string; name: string; type: string }
 ) => {
-  const formData = new FormData();
-  formData.append('slot', String(slot));
-  formData.append('file', file as any);
+  return (async () => {
+    const formData = new FormData();
+    formData.append('slot', String(slot));
+    await appendMultipartFile(formData, 'file', file);
 
-  return api.post(`/vendors/${vendorId}/business/images/upload`, formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+    return api.post(`/vendors/${vendorId}/business/images/upload`, formData, {
+      headers: Platform.OS === 'web' ? {} : { 'Content-Type': 'multipart/form-data' },
+    });
+  })();
 };
 
 export const uploadVendorKycFile = (
@@ -545,21 +585,83 @@ export const uploadVendorKycFile = (
   docType: 'aadhaar' | 'pan' | 'face_scan',
   file: { uri: string; name: string; type: string }
 ) => {
-  const formData = new FormData();
-  formData.append('doc_type', docType);
-  formData.append('file', file as any);
+  return (async () => {
+    const formData = new FormData();
+    formData.append('doc_type', docType);
+    await appendMultipartFile(formData, 'file', file);
 
-  return api.post(`/vendors/${vendorId}/kyc/upload`, formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+    return api.post(`/vendors/${vendorId}/kyc/upload`, formData, {
+      headers: Platform.OS === 'web' ? {} : { 'Content-Type': 'multipart/form-data' },
+    });
+  })();
 };
 
-export const extractKycTextFromImage = (vendorId: string, file: { uri: string; name: string; type: string }) => {
+export const extractKycTextFromImage = async (vendorId: string, file: { uri: string; name: string; type: string }) => {
+  const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+  const token = await AsyncStorage.getItem('auth_token');
+  
   const formData = new FormData();
-  formData.append('file', file as any);
-  return api.post(`/vendors/${vendorId}/kyc/vision-extract`, formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+
+  let fileAttached = false;
+  try {
+    await appendMultipartFile(formData, 'file', file);
+    fileAttached = true;
+    console.log('[OCR API] File attached successfully, has file:', formData.has('file'));
+  } catch (error) {
+    console.warn('extractKycTextFromImage: multipart file attach failed, will try base64 fallback', error);
+  }
+
+  // For web, always try base64 as it's more reliable
+  if (Platform.OS === 'web') {
+    try {
+      console.log('[OCR API] Converting to base64 for web...');
+      const imageBase64 = await getImageBase64FromUri(file);
+      if (imageBase64) {
+        formData.append('image_base64', imageBase64);
+        console.log('[OCR API] Base64 attached, length:', imageBase64.length, 'has image_base64:', formData.has('image_base64'));
+      }
+    } catch (error) {
+      console.warn('extractKycTextFromImage: base64 fallback generation failed', error);
+    }
+  }
+
+  if (!fileAttached && !formData.get('image_base64')) {
+    throw new Error('Failed to prepare image payload for OCR upload');
+  }
+
+  console.log('[OCR API] Sending request to backend...');
+  console.log('[OCR API] Fetch URL:', `${API_URL}/api/vendors/${vendorId}/kyc/vision-extract`);
+  
+  let response;
+  try {
+    const headers: Record<string, string> = {
+      'Bypass-Tunnel-Reminder': 'true', // Required for localtunnel
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    response = await fetch(`${API_URL}/api/vendors/${vendorId}/kyc/vision-extract`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+  } catch (fetchError: any) {
+    console.error('[OCR API] Fetch error:', fetchError);
+    throw new Error(`Network error: ${fetchError.message}`);
+  }
+
+  console.log('[OCR API] Response status:', response.status, response.statusText);
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('[OCR API] Error response:', response.status, errorText);
+    throw new Error(`OCR failed: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  console.log('[OCR API] Response data:', JSON.stringify(data).substring(0, 500));
+  return { data };
 };
 
 export const generateVendorAadhaarOtp = (vendorId: string, data: {
@@ -624,5 +726,15 @@ export const resolveSOSAlert = (sosId: string, status: 'resolved' | 'cancelled')
 
 export const respondToSOS = (sosId: string, response: 'coming' | 'called') => 
   api.post(`/sos/${sosId}/respond`, { response });
+
+// =================== SPEECH TRANSCRIPTION API ===================
+
+export const transcribeAudio = async (audioBase64: string, languageCode: string = 'en-IN') => {
+  const response = await api.post('/speech/transcribe', {
+    audio_base64: audioBase64,
+    language_code: languageCode,
+  });
+  return response.data;
+};
 
 export default api;

@@ -408,22 +408,39 @@ export default function MessagesScreen() {
 
           {/* Community Content */}
           {activeCommunityTab === 'Chat' ? (
-            <FlatList
-              data={communities}
-              renderItem={renderCommunity}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
-              refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} />
-              }
-              ListEmptyComponent={
-                <View style={styles.emptyState}>
-                  <Ionicons name="people-outline" size={48} color={COLORS.textLight} />
-                  <Text style={styles.emptyTitle}>No Communities</Text>
-                  <Text style={styles.emptyText}>Set up your location to join communities</Text>
+            <>
+              {/* Live Mantra Jaap Banner */}
+              <TouchableOpacity 
+                style={styles.liveMantraButton}
+                onPress={() => router.push('/mantra-jaap' as any)}
+              >
+                <View style={styles.liveMantraContent}>
+                  <Ionicons name="radio" size={28} color={COLORS.primary} />
+                  <View style={styles.liveMantraTextContainer}>
+                    <Text style={styles.liveMantraTitle}>Live Mantra Jaap</Text>
+                    <Text style={styles.liveMantraSubtitle}>Join divine chanting session</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={22} color={COLORS.primary} />
                 </View>
-              }
-            />
+              </TouchableOpacity>
+
+              <FlatList
+                data={communities}
+                renderItem={renderCommunity}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.listContent}
+                refreshControl={
+                  <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} />
+                }
+                ListEmptyComponent={
+                  <View style={styles.emptyState}>
+                    <Ionicons name="people-outline" size={48} color={COLORS.textLight} />
+                    <Text style={styles.emptyTitle}>No Communities</Text>
+                    <Text style={styles.emptyText}>Set up your location to join communities</Text>
+                  </View>
+                }
+              />
+            </>
           ) : activeCommunityTab === 'General' ? (
             <View style={styles.generalContainer}>
               <TouchableOpacity
@@ -581,6 +598,36 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  // Live Mantra Jaap Button
+  liveMantraButton: {
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
+    borderWidth: 2,
+    borderColor: COLORS.primary,
+    borderStyle: 'dashed',
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: `${COLORS.primary}08`,
+  },
+  liveMantraContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.md,
+    gap: SPACING.md,
+  },
+  liveMantraTextContainer: {
+    flex: 1,
+  },
+  liveMantraTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  liveMantraSubtitle: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 2,
   },
   loadingContainer: {
     flex: 1,

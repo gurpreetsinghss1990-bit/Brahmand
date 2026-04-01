@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { COLORS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { useHelpRequestStore } from '../store/helpRequestStore';
+import { useAuthStore } from '../store/authStore';
 import { 
   getWisdom, 
   createSOSAlert, 
@@ -81,6 +82,7 @@ const getHelpColor = (type: string): string => {
 
 export const FloatingUtilityButton = () => {
   const router = useRouter();
+  const { user } = useAuthStore();
   const [modalVisible, setModalVisible] = useState(false);
   const [hasLoadedData, setHasLoadedData] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -95,6 +97,7 @@ export const FloatingUtilityButton = () => {
   const [wisdom, setWisdom] = useState<any>(null);
   const [panchang, setPanchang] = useState<any>(null);
   const [nextFestival, setNextFestival] = useState<any>(null);
+  const homeLocation = (user as any)?.home_location;
   
   // Pulse animation for nearby SOS
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -276,6 +279,45 @@ export const FloatingUtilityButton = () => {
     );
   };
 
+  const openPanchangWithLocation = async () => {
+    setModalVisible(false);
+
+    try {
+      const hasPermission = await LocationService.ensureForegroundPermission();
+      if (hasPermission) {
+        const location = await LocationService.getCurrentPosition({
+          enableHighAccuracy: false,
+          timeout: 15000,
+          maximumAge: 10000,
+        });
+
+        router.push({
+          pathname: '/panchang',
+          params: {
+            lat: String(location.coords.latitude),
+            lng: String(location.coords.longitude),
+          },
+        });
+        return;
+      }
+    } catch {
+      // Use home location fallback below
+    }
+
+    if (typeof homeLocation?.latitude === 'number' && typeof homeLocation?.longitude === 'number') {
+      router.push({
+        pathname: '/panchang',
+        params: {
+          lat: String(homeLocation.latitude),
+          lng: String(homeLocation.longitude),
+        },
+      });
+      return;
+    }
+
+    router.push({ pathname: '/panchang', params: { needsLocation: '1' } });
+  };
+
   const isActiveHelp = hasActiveRequest();
   const hasNearbyEmergency = nearbySOSCount > 0;
 
@@ -436,10 +478,7 @@ export const FloatingUtilityButton = () => {
               <View style={styles.utilityGrid}>
                 <TouchableOpacity 
                   style={styles.utilityCard}
-                  onPress={() => {
-                    setModalVisible(false);
-                    router.push('/panchang');
-                  }}
+                  onPress={openPanchangWithLocation}
                 >
                   <View style={[styles.utilityIconBg, { backgroundColor: '#FFE5CC' }]}>
                     <Ionicons name="calendar" size={20} color={COLORS.primary} />

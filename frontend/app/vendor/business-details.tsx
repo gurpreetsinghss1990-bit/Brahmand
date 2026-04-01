@@ -15,23 +15,42 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { BORDER_RADIUS, COLORS, SPACING } from '../../src/constants/theme';
-import { useVendorStore } from '../../src/store/vendorStore';
+import { useVendorStore, Vendor } from '../../src/store/vendorStore';
+import { useAuthStore } from '../../src/store/authStore';
 import { extractKycTextFromImage } from '../../src/services/api';
+import { CollapsibleSection } from '../../src/components/CollapsibleSection';
 
 const IMAGE_SLOTS = [0, 1, 2, 3, 4];
 
 export default function VendorBusinessDetailsScreen() {
   const router = useRouter();
   const { myVendor, fetchMyVendor, uploadBusinessImage, updateBusinessProfile } = useVendorStore();
+  const { isLoading: authLoading, isAuthenticated } = useAuthStore();
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.replace('/auth' as any);
+    }
+  }, [authLoading, isAuthenticated, router]);
 
   const [loadingSlot, setLoadingSlot] = useState<number | null>(null);
-  const [showMenuEditor, setShowMenuEditor] = useState(false);
-  const [menuInput, setMenuInput] = useState('');
-  const [menuItems, setMenuItems] = useState<string[]>([]);
-  const [savingMenu, setSavingMenu] = useState(false);
-  const [offersHomeDelivery, setOffersHomeDelivery] = useState(false);
   const [visionLoading, setVisionLoading] = useState(false);
   const [visionExtractedItems, setVisionExtractedItems] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  // Form states
+  const [menuItems, setMenuItems] = useState<string[]>([]);
+  const [menuInput, setMenuInput] = useState('');
+  const [offersHomeDelivery, setOffersHomeDelivery] = useState(false);
+  const [offersCashOnDelivery, setOffersCashOnDelivery] = useState(false);
+  const [businessHours, setBusinessHours] = useState('');
+  const [notes, setNotes] = useState('');
+  const [offers, setOffers] = useState('');
+  const [websiteLink, setWebsiteLink] = useState('');
+  const [facebook, setFacebook] = useState('');
+  const [instagram, setInstagram] = useState('');
+  const [whatsapp, setWhatsapp] = useState('');
 
   useEffect(() => {
     fetchMyVendor().catch((error) => {
@@ -40,11 +59,17 @@ export default function VendorBusinessDetailsScreen() {
   }, [fetchMyVendor]);
 
   useEffect(() => {
-    if (!myVendor) {
-      return;
-    }
+    if (!myVendor) return;
     setMenuItems(myVendor.menu_items || []);
     setOffersHomeDelivery(Boolean(myVendor.offers_home_delivery));
+    setOffersCashOnDelivery(Boolean(myVendor.offers_cash_on_delivery));
+    setBusinessHours(myVendor.business_hours || '');
+    setNotes(myVendor.notes || '');
+    setOffers(myVendor.offers || '');
+    setWebsiteLink(myVendor.website_link || '');
+    setFacebook(myVendor.social_media?.facebook || '');
+    setInstagram(myVendor.social_media?.instagram || '');
+    setWhatsapp(myVendor.social_media?.whatsapp || '');
   }, [myVendor]);
 
   const galleryImages = useMemo(() => {
@@ -69,24 +94,20 @@ export default function VendorBusinessDetailsScreen() {
       router.replace('/(tabs)/vendor');
       return false;
     }
-
     if ((myVendor as any).kyc_status !== 'verified') {
       Alert.alert('Not available', 'This section is available only for approved businesses.');
       router.replace('/vendor/dashboard');
       return false;
     }
-
     return true;
   };
 
   const pickAndUploadImage = async (slot: number) => {
-    if (!validateAccess() || !myVendor) {
-      return;
-    }
+    if (!validateAccess() || !myVendor) return;
 
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (permission.status !== 'granted') {
-      Alert.alert('Permission Denied', 'Media library access is required to upload business images.');
+      Alert.alert('Permission Denied', 'Media library access is required.');
       return;
     }
 
@@ -96,9 +117,7 @@ export default function VendorBusinessDetailsScreen() {
       quality: 0.8,
     });
 
-    if (result.canceled || !result.assets?.length) {
-      return;
-    }
+    if (result.canceled || !result.assets?.length) return;
 
     const asset = result.assets[0];
     const fileName = (asset as any).fileName || `business-${slot + 1}.jpg`;
@@ -106,11 +125,7 @@ export default function VendorBusinessDetailsScreen() {
 
     try {
       setLoadingSlot(slot);
-      await uploadBusinessImage(myVendor.id, slot, {
-        uri: asset.uri,
-        name: fileName,
-        type: mimeType,
-      });
+      await uploadBusinessImage(myVendor.id, slot, { uri: asset.uri, name: fileName, type: mimeType });
       await fetchMyVendor();
     } catch (error: any) {
       Alert.alert('Upload failed', error?.response?.data?.detail || 'Could not upload image.');
@@ -121,9 +136,7 @@ export default function VendorBusinessDetailsScreen() {
 
   const addMenuItem = () => {
     const value = menuInput.trim();
-    if (!value) {
-      return;
-    }
+    if (!value) return;
     if (menuItems.length >= 30) {
       Alert.alert('Limit reached', 'You can add up to 30 menu items.');
       return;
@@ -132,7 +145,6 @@ export default function VendorBusinessDetailsScreen() {
       setMenuInput('');
       return;
     }
-
     setMenuItems([...menuItems, value]);
     setMenuInput('');
   };
@@ -141,33 +153,21 @@ export default function VendorBusinessDetailsScreen() {
     setMenuItems(menuItems.filter((_, i) => i !== index));
   };
 
-  const saveMenuAndDelivery = async () => {
-    if (!validateAccess() || !myVendor) {
+  const handleAddExtractedItem = (item: string, idx: number) => {
+    if (menuItems.length >= 30) {
+      Alert.alert('Limit reached', 'Maximum 30 menu items allowed.');
       return;
     }
-
-    try {
-      setSavingMenu(true);
-      await updateBusinessProfile(myVendor.id, {
-        menu_items: menuItems,
-        offers_home_delivery: offersHomeDelivery,
-      });
-      Alert.alert('Saved', 'Business details updated successfully.');
-    } catch (error: any) {
-      Alert.alert('Save failed', error?.response?.data?.detail || 'Could not save business details.');
-    } finally {
-      setSavingMenu(false);
-    }
+    setMenuItems([...menuItems, item]);
+    setVisionExtractedItems(visionExtractedItems.filter((_, i) => i !== idx));
   };
 
   const handleOcrUpload = async () => {
-    if (!validateAccess() || !myVendor) {
-      return;
-    }
+    if (!validateAccess() || !myVendor) return;
 
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (permission.status !== 'granted') {
-      Alert.alert('Permission Denied', 'Media library access is required to upload menu images.');
+      Alert.alert('Permission Denied', 'Media library access is required.');
       return;
     }
 
@@ -177,9 +177,7 @@ export default function VendorBusinessDetailsScreen() {
       allowsEditing: false,
     });
 
-    if (result.canceled || !result.assets?.length) {
-      return;
-    }
+    if (result.canceled || !result.assets?.length) return;
 
     const asset = result.assets[0];
     const fileName = (asset as any).fileName || `menu-${Date.now()}.jpg`;
@@ -192,6 +190,7 @@ export default function VendorBusinessDetailsScreen() {
         name: fileName,
         type: mimeType,
       });
+
       const extracted = response?.data?.raw_texts || [];
       const fallbackText = response?.data?.text || response?.data?.full_text || '';
       const source = extracted.length > 0 ? extracted.join('\n') : fallbackText;
@@ -206,14 +205,41 @@ export default function VendorBusinessDetailsScreen() {
         Alert.alert('No items found', 'Cloud Vision did not detect menu text. Please try another image.');
       }
     } catch (error: any) {
-      console.warn('Menu OCR failed', error);
-      Alert.alert('Upload failed', 'Could not process menu image.');
+      console.error('[OCR] Menu OCR failed:', error);
+      Alert.alert('Upload failed', error?.message || 'Could not process menu image.');
     } finally {
       setVisionLoading(false);
     }
   };
 
-  if (!myVendor) {
+  const saveAllDetails = async () => {
+    if (!validateAccess() || !myVendor) return;
+
+    try {
+      setSaving(true);
+      await updateBusinessProfile(myVendor.id, {
+        menu_items: menuItems,
+        offers_home_delivery: offersHomeDelivery,
+        offers_cash_on_delivery: offersCashOnDelivery,
+        business_hours: businessHours,
+        notes: notes,
+        offers: offers,
+        website_link: websiteLink,
+        social_media: {
+          facebook,
+          instagram,
+          whatsapp,
+        },
+      });
+      Alert.alert('Saved', 'Business details updated successfully.');
+    } catch (error: any) {
+      Alert.alert('Save failed', error?.response?.data?.detail || 'Could not save business details.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (authLoading || !myVendor) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
@@ -234,112 +260,210 @@ export default function VendorBusinessDetailsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.sectionTitle}>Upload 5 business images</Text>
-        <View style={styles.imageGrid}>
-          {IMAGE_SLOTS.map((slot) => {
-            const imageUrl = galleryImages[slot];
-            const isUploading = loadingSlot === slot;
-            return (
-              <TouchableOpacity key={slot} style={styles.imageBox} onPress={() => pickAndUploadImage(slot)}>
-                {isUploading ? (
-                  <ActivityIndicator color={COLORS.primary} />
-                ) : imageUrl ? (
-                  <Image source={{ uri: imageUrl }} style={styles.imagePreview} />
-                ) : (
-                  <Ionicons name="add" size={34} color={COLORS.primary} />
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        
+        <Text style={styles.topTitle}>Select the things related to your business:</Text>
 
-        <TouchableOpacity style={styles.ocrUploadButton} onPress={handleOcrUpload}>
-          {visionLoading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
-              <Ionicons name="cloud-upload" size={20} color="#fff" />
-              <Text style={styles.ocrUploadButtonText}>Upload Menu Image (OCR)</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        {/* Section 1: Business Images */}
+        <CollapsibleSection title="Business Images" icon="images" defaultExpanded={true}>
+          <Text style={styles.sectionDescription}>Add photos of your shop, products, or services to attract customers</Text>
+          <View style={styles.imageGrid}>
+            {IMAGE_SLOTS.map((slot) => {
+              const imageUrl = galleryImages[slot];
+              const isUploading = loadingSlot === slot;
+              return (
+                <TouchableOpacity key={slot} style={styles.imageBox} onPress={() => pickAndUploadImage(slot)}>
+                  {isUploading ? (
+                    <ActivityIndicator color={COLORS.primary} />
+                  ) : imageUrl ? (
+                    <Image source={{ uri: imageUrl }} style={styles.imagePreview} />
+                  ) : (
+                    <Ionicons name="add" size={34} color={COLORS.primary} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </CollapsibleSection>
 
-        {visionExtractedItems.length > 0 && (
-          <View style={styles.detectedItemsCard}>
-            <Text style={styles.detectedItemsTitle}>Detected menu items from image:</Text>
-            {visionExtractedItems.map((item, idx) => (
-              <View key={`${item}-${idx}`} style={styles.detectedItemRow}>
-                <Text style={styles.detectedItemText}>• {item}</Text>
-                <TouchableOpacity onPress={() => {
-                  const newItems = [...menuItems, item];
-                  setMenuItems(newItems);
-                  setVisionExtractedItems(visionExtractedItems.filter((_, i) => i !== idx));
-                }}>
+        {/* Section 2: Menu */}
+        <CollapsibleSection title="Menu / Products" icon="restaurant" defaultExpanded={true}>
+          <Text style={styles.sectionDescription}>List the dishes, items, or services you offer. Upload a menu image to auto-detect items.</Text>
+          <TouchableOpacity style={styles.ocrButton} onPress={handleOcrUpload} disabled={visionLoading}>
+            {visionLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="cloud-upload" size={18} color="#fff" />
+                <Text style={styles.ocrButtonText}>Upload Menu Image (OCR)</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {visionExtractedItems.length > 0 && (
+            <View style={styles.extractedSection}>
+              <Text style={styles.extractedTitle}>Detected items - tap + to add:</Text>
+              {visionExtractedItems.map((item, idx) => (
+                <TouchableOpacity key={`${item}-${idx}`} style={styles.extractedItem} onPress={() => handleAddExtractedItem(item, idx)}>
+                  <Text style={styles.extractedText}>• {item}</Text>
                   <Ionicons name="add-circle" size={20} color={COLORS.primary} />
                 </TouchableOpacity>
-              </View>
-            ))}
-            <TouchableOpacity style={styles.clearOcrButton} onPress={() => setVisionExtractedItems([])}>
-              <Text style={styles.clearOcrButtonText}>Clear detected items</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        <TouchableOpacity style={styles.menuToggleButton} onPress={() => setShowMenuEditor((prev) => !prev)}>
-          <Text style={styles.menuToggleText}>{showMenuEditor ? 'Hide menu list' : 'Add menu items you offer'}</Text>
-          <Ionicons name={showMenuEditor ? 'chevron-up' : 'chevron-down'} size={18} color={COLORS.primary} />
-        </TouchableOpacity>
-
-        {showMenuEditor && (
-          <View style={styles.menuEditorCard}>
-            <View style={styles.menuInputRow}>
-              <TextInput
-                style={styles.menuInput}
-                placeholder="e.g. Paneer Thali - ₹250"
-                placeholderTextColor={COLORS.textLight}
-                value={menuInput}
-                onChangeText={setMenuInput}
-              />
-              <TouchableOpacity style={styles.addItemButton} onPress={addMenuItem}>
-                <Ionicons name="add" size={20} color="#fff" />
+              ))}
+              <TouchableOpacity onPress={() => setVisionExtractedItems([])}>
+                <Text style={styles.clearText}>Clear all</Text>
               </TouchableOpacity>
             </View>
+          )}
 
+          <View style={styles.menuInputRow}>
+            <TextInput
+              style={styles.menuInput}
+              placeholder="Add menu item (e.g., Paneer Thali - ₹250)"
+              placeholderTextColor={COLORS.textLight}
+              value={menuInput}
+              onChangeText={setMenuInput}
+            />
+            <TouchableOpacity style={styles.addButton} onPress={addMenuItem}>
+              <Ionicons name="add" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
+          {menuItems.length > 0 && (
             <View style={styles.menuList}>
-              {menuItems.length === 0 ? (
-                <Text style={styles.emptyText}>No menu items added yet.</Text>
-              ) : (
-                menuItems.map((item, index) => (
-                  <View key={`${item}-${index}`} style={styles.menuItemRow}>
-                    <Text style={styles.menuItemText}>{item}</Text>
-                    <TouchableOpacity onPress={() => removeMenuItem(index)}>
-                      <Ionicons name="close-circle" size={20} color={COLORS.error} />
-                    </TouchableOpacity>
-                  </View>
-                ))
-              )}
+              {menuItems.map((item, idx) => (
+                <View key={`${item}-${idx}`} style={styles.menuItem}>
+                  <Text style={styles.menuItemText}>{item}</Text>
+                  <TouchableOpacity onPress={() => removeMenuItem(idx)}>
+                    <Ionicons name="close-circle" size={20} color={COLORS.error} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+        </CollapsibleSection>
+
+        {/* Section 3: Business Hours */}
+        <CollapsibleSection title="Business Hours" icon="time" defaultExpanded={true}>
+          <Text style={styles.sectionDescription}>Let customers know when you're open</Text>
+          <TextInput
+            style={styles.textInput}
+            placeholder="e.g., Mon-Sat: 9 AM - 9 PM, Sunday: Closed"
+            placeholderTextColor={COLORS.textLight}
+            value={businessHours}
+            onChangeText={setBusinessHours}
+            multiline
+          />
+        </CollapsibleSection>
+
+        {/* Section 4: Offers & Deals */}
+        <CollapsibleSection title="Offers & Deals" icon="pricetag" defaultExpanded={true}>
+          <Text style={styles.sectionDescription}>Attract customers with special offers, discounts, or deals</Text>
+          <TextInput
+            style={styles.textInput}
+            placeholder="e.g., 10% off on first order, Free delivery above ₹500"
+            placeholderTextColor={COLORS.textLight}
+            value={offers}
+            onChangeText={setOffers}
+            multiline
+          />
+        </CollapsibleSection>
+
+        {/* Section 5: Delivery Options */}
+        <CollapsibleSection title="Delivery Options" icon="bicycle" defaultExpanded={true}>
+          <Text style={styles.sectionDescription}>Tell customers about your delivery services</Text>
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>Home Delivery</Text>
+            <View style={styles.toggleButtons}>
+              <TouchableOpacity
+                style={[styles.toggleButton, offersHomeDelivery && styles.toggleButtonActive]}
+                onPress={() => setOffersHomeDelivery(true)}
+              >
+                <Text style={[styles.toggleText, offersHomeDelivery && styles.toggleTextActive]}>Yes</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.toggleButton, !offersHomeDelivery && styles.toggleButtonActive]}
+                onPress={() => setOffersHomeDelivery(false)}
+              >
+                <Text style={[styles.toggleText, !offersHomeDelivery && styles.toggleTextActive]}>No</Text>
+              </TouchableOpacity>
             </View>
           </View>
-        )}
 
-        <Text style={styles.sectionTitle}>Do you offer home delivery?</Text>
-        <View style={styles.deliveryToggleRow}>
-          <TouchableOpacity
-            style={[styles.toggleOption, offersHomeDelivery && styles.toggleOptionActive]}
-            onPress={() => setOffersHomeDelivery(true)}
-          >
-            <Text style={[styles.toggleText, offersHomeDelivery && styles.toggleTextActive]}>Yes</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.toggleOption, !offersHomeDelivery && styles.toggleOptionActive]}
-            onPress={() => setOffersHomeDelivery(false)}
-          >
-            <Text style={[styles.toggleText, !offersHomeDelivery && styles.toggleTextActive]}>No</Text>
-          </TouchableOpacity>
-        </View>
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>Cash on Delivery</Text>
+            <View style={styles.toggleButtons}>
+              <TouchableOpacity
+                style={[styles.toggleButton, offersCashOnDelivery && styles.toggleButtonActive]}
+                onPress={() => setOffersCashOnDelivery(true)}
+              >
+                <Text style={[styles.toggleText, offersCashOnDelivery && styles.toggleTextActive]}>Yes</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.toggleButton, !offersCashOnDelivery && styles.toggleButtonActive]}
+                onPress={() => setOffersCashOnDelivery(false)}
+              >
+                <Text style={[styles.toggleText, !offersCashOnDelivery && styles.toggleTextActive]}>No</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </CollapsibleSection>
 
-        <TouchableOpacity style={styles.saveButton} onPress={saveMenuAndDelivery} disabled={savingMenu}>
-          {savingMenu ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Save business details</Text>}
+        {/* Section 6: Website & Social Media */}
+        <CollapsibleSection title="Website & Social Media" icon="globe" defaultExpanded={true}>
+          <Text style={styles.sectionDescription}>Connect with customers through your online presence</Text>
+          <TextInput
+            style={styles.textInput}
+            placeholder="Website (e.g., https://mybusiness.com)"
+            placeholderTextColor={COLORS.textLight}
+            value={websiteLink}
+            onChangeText={setWebsiteLink}
+            autoCapitalize="none"
+            keyboardType="url"
+          />
+          
+          <TextInput
+            style={styles.textInput}
+            placeholder="Facebook URL or Page ID"
+            placeholderTextColor={COLORS.textLight}
+            value={facebook}
+            onChangeText={setFacebook}
+            autoCapitalize="none"
+          />
+          
+          <TextInput
+            style={styles.textInput}
+            placeholder="Instagram handle (e.g., @mybusiness)"
+            placeholderTextColor={COLORS.textLight}
+            value={instagram}
+            onChangeText={setInstagram}
+            autoCapitalize="none"
+          />
+          
+          <TextInput
+            style={styles.textInput}
+            placeholder="WhatsApp number (e.g., 919876543210)"
+            placeholderTextColor={COLORS.textLight}
+            value={whatsapp}
+            onChangeText={setWhatsapp}
+            keyboardType="phone-pad"
+          />
+        </CollapsibleSection>
+
+        {/* Section 7: Notes */}
+        <CollapsibleSection title="Additional Notes" icon="document-text" defaultExpanded={true}>
+          <Text style={styles.sectionDescription}>Any other information you'd like customers to know</Text>
+          <TextInput
+            style={[styles.textInput, styles.notesInput]}
+            placeholder="Any additional information about your business..."
+            placeholderTextColor={COLORS.textLight}
+            value={notes}
+            onChangeText={setNotes}
+            multiline
+            numberOfLines={4}
+          />
+        </CollapsibleSection>
+
+        <TouchableOpacity style={styles.saveButton} onPress={saveAllDetails} disabled={saving}>
+          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Save All Details</Text>}
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -347,15 +471,8 @@ export default function VendorBusinessDetailsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  centered: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  container: { flex: 1, backgroundColor: COLORS.background },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -365,30 +482,29 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.divider,
     backgroundColor: COLORS.surface,
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  content: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.xl,
-    gap: SPACING.md,
-  },
-  sectionTitle: {
+  headerTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text },
+  content: { padding: SPACING.md, paddingBottom: SPACING.xl, gap: SPACING.md },
+  
+  // Top title
+  topTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.text,
+    marginBottom: SPACING.sm,
   },
-  imageGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.sm,
+  sectionDescription: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.sm,
+    lineHeight: 18,
   },
+  
+  // Image grid
+  imageGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm, marginTop: SPACING.sm },
   imageBox: {
     width: '31%',
     aspectRatio: 1,
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.background,
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: BORDER_RADIUS.md,
@@ -396,40 +512,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  imagePreview: {
-    width: '100%',
-    height: '100%',
-  },
-  menuToggleButton: {
+  imagePreview: { width: '100%', height: '100%' },
+  
+  // OCR Section
+  ocrButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+    backgroundColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.md,
+    paddingVertical: SPACING.sm + 2,
     marginTop: SPACING.sm,
+  },
+  ocrButtonText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  
+  extractedSection: { marginTop: SPACING.md, gap: SPACING.xs },
+  extractedTitle: { fontSize: 13, fontWeight: '600', color: COLORS.text, marginBottom: SPACING.xs },
+  extractedItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: COLORS.surface,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
   },
-  menuToggleText: {
-    color: COLORS.primary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  menuEditorCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: SPACING.md,
-    gap: SPACING.sm,
-  },
-  menuInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-  },
+  extractedText: { color: COLORS.text, flex: 1, fontSize: 13 },
+  clearText: { color: COLORS.error, fontSize: 12, marginTop: SPACING.xs },
+  
+  // Menu input
+  menuInputRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginTop: SPACING.sm },
   menuInput: {
     flex: 1,
     borderWidth: 1,
@@ -440,7 +552,7 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     backgroundColor: COLORS.background,
   },
-  addItemButton: {
+  addButton: {
     width: 38,
     height: 38,
     borderRadius: 19,
@@ -448,102 +560,48 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  menuList: {
-    gap: SPACING.xs,
-  },
-  menuItemRow: {
+  
+  // Menu list
+  menuList: { marginTop: SPACING.sm, gap: SPACING.xs },
+  menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingVertical: SPACING.xs,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.divider,
-    paddingVertical: SPACING.xs,
   },
-  menuItemText: {
-    color: COLORS.text,
-    flex: 1,
-    marginRight: SPACING.sm,
-  },
-  emptyText: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-  },
-  deliveryToggleRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-  toggleOption: {
-    flex: 1,
-    backgroundColor: COLORS.surface,
+  menuItemText: { color: COLORS.text, flex: 1 },
+  
+  // Text inputs
+  textInput: {
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: BORDER_RADIUS.md,
-    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
-  },
-  toggleOptionActive: {
-    borderColor: COLORS.primary,
-    backgroundColor: `${COLORS.primary}12`,
-  },
-  toggleText: {
-    color: COLORS.textSecondary,
-    fontWeight: '600',
-  },
-  toggleTextActive: {
-    color: COLORS.primary,
-  },
-  ocrUploadButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.sm,
-    backgroundColor: COLORS.primary,
-    borderRadius: BORDER_RADIUS.md,
-    paddingVertical: SPACING.sm + 2,
+    color: COLORS.text,
+    backgroundColor: COLORS.background,
     marginTop: SPACING.sm,
   },
-  ocrUploadButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  detectedItemsCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: BORDER_RADIUS.md,
+  notesInput: { minHeight: 80, textAlignVertical: 'top' },
+  
+  // Toggle
+  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: SPACING.sm },
+  toggleLabel: { fontSize: 14, color: COLORS.text },
+  toggleButtons: { flexDirection: 'row', gap: SPACING.sm },
+  toggleButton: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs + 2,
     borderWidth: 1,
     borderColor: COLORS.border,
-    padding: SPACING.md,
-    marginTop: SPACING.sm,
-    gap: SPACING.xs,
+    borderRadius: BORDER_RADIUS.md,
   },
-  detectedItemsTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: SPACING.xs,
-  },
-  detectedItemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: SPACING.xs,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.divider,
-  },
-  detectedItemText: {
-    color: COLORS.text,
-    flex: 1,
-    fontSize: 13,
-  },
-  clearOcrButton: {
-    marginTop: SPACING.sm,
-    alignItems: 'center',
-  },
-  clearOcrButtonText: {
-    color: COLORS.error,
-    fontSize: 13,
-    fontWeight: '600',
-  },
+  toggleButtonActive: { borderColor: COLORS.primary, backgroundColor: `${COLORS.primary}12` },
+  toggleText: { fontSize: 13, color: COLORS.textSecondary },
+  toggleTextActive: { color: COLORS.primary, fontWeight: '600' },
+  
+  // Save
   saveButton: {
     marginTop: SPACING.md,
     backgroundColor: COLORS.primary,
@@ -552,9 +610,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: SPACING.md,
   },
-  saveButtonText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 15,
-  },
+  saveButtonText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });
